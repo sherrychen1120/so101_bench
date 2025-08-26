@@ -1,0 +1,21 @@
+# SO-101 Robotic Arms udev rules
+# This file ensures consistent device naming for SO-101 leader and follower arms
+# 
+# Installation:
+# 1. Copy this file to: /etc/udev/rules.d/99-so101-arms.rules
+# 2. Reload udev rules: sudo udevadm control --reload-rules
+# 3. Trigger udev: sudo udevadm trigger
+# 4. Add user to dialout group: sudo usermod -a -G dialout $USER
+# 5. Log out and back in for group changes to take effect
+#
+# After installation, your arms will be available as:
+# - /dev/so101_leader (Leader arm)
+# - /dev/so101_follower (Follower arm)
+
+# SO-101 Leader Arm
+# Method: Serial Number (Recommended)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d3", ATTRS{serial}=="5A7A056452", SYMLINK+="so101_leader", MODE="0666", GROUP="dialout"
+
+# SO-101 Follower Arm
+# Method: Serial Number (Recommended)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d3", ATTRS{serial}=="5A7A057251", SYMLINK+="so101_follower", MODE="0666", GROUP="dialout"

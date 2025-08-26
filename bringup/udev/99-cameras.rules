@@ -1,0 +1,40 @@
+# Camera udev rules for consistent device naming
+# Place this file at: /etc/udev/rules.d/99-cameras.rules
+# 
+# After creating/modifying this file, run:
+# sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# Template - Replace the VALUES below with actual values from identify_cameras.sh
+
+# METHOD 1: Using serial numbers (RECOMMENDED if available)
+# Replace VENDOR_ID, PRODUCT_ID, and SERIAL_NUMBER with actual values
+# 
+# Front camera
+# SUBSYSTEM=="video4linux", ATTRS{idVendor}=="VENDOR_ID", ATTRS{idProduct}=="PRODUCT_ID", ATTRS{serial}=="SERIAL_NUMBER_1", SYMLINK+="cam_front"
+#
+# Right camera  
+# SUBSYSTEM=="video4linux", ATTRS{idVendor}=="VENDOR_ID", ATTRS{idProduct}=="PRODUCT_ID", ATTRS{serial}=="SERIAL_NUMBER_2", SYMLINK+="cam_side"
+
+# METHOD 2: Using USB paths (use if serials not available/unique)
+# Replace VENDOR_ID, PRODUCT_ID, and USB_PATH with actual values
+
+# Camera 1 (plugged in front of desktop) /dev/cam_top
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="3443", ATTRS{idProduct}=="60bb", ENV{ID_PATH}=="pci-0000:06:00.1-usb-0:4:1.0", KERNEL=="video[02468]*", SYMLINK+="cam_top", MODE="0666", GROUP="video"
+
+# Camera 2: (plugged in back of desktop) /dev/cam_front    
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="3443", ATTRS{idProduct}=="60bb", ENV{ID_PATH}=="pci-0000:0b:00.3-usb-0:1:1.0", KERNEL=="video[02468]*", SYMLINK+="cam_front", MODE="0666", GROUP="video"
+
+# Camera 3: (plugged in back of desktop, lower row) /dev/cam_wrist   
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="05a3", ATTRS{idProduct}=="9230", ENV{ID_PATH}=="pci-0000:06:00.1-usb-0:2:1.0", KERNEL=="video[02468]*", SYMLINK+="cam_wrist", MODE="0666", GROUP="video"
+
+# EXAMPLE with real values (uncomment and modify):
+# Front camera with serial ABC123
+#SUBSYSTEM=="video4linux", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="085b", ATTRS{serial}=="ABC123", SYMLINK+="cam_front"
+# Side camera with serial DEF456  
+#SUBSYSTEM=="video4linux", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="085b", ATTRS{serial}=="DEF456", SYMLINK+="cam_side"
+
+# OR using USB paths:
+# Front camera on USB port 1-1
+#SUBSYSTEM=="video4linux", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="085b", ENV{ID_PATH}=="pci-0000:00:14.0-usb-0:1:1.0", SYMLINK+="cam_front"
+# Side camera on USB port 1-2
+#SUBSYSTEM=="video4linux", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="085b", ENV{ID_PATH}=="pci-0000:00:14.0-usb-0:2:1.0", SYMLINK+="cam_side"
