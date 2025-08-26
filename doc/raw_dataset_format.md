@@ -1,4 +1,4 @@
-TODO(sherry): Update this!
+
 
 # Raw Dataset Format for LeRobot
 
@@ -21,30 +21,24 @@ The raw format saves robot data in a human-readable, hierarchical structure that
 datasets/
   {dataset_name}/
     arm_calib/
-      leader.json                 # Leader arm calibration data
-      follower.json              # Follower arm calibration data
+      {leader_id}.json           # Leader arm calibration data
+      {follower_id}.json         # Follower arm calibration data
     splits.yaml                  # Dataset splits (train/val_id/val_ood)
     manifest.jsonl              # One JSON entry per episode
     episodes/
-      {episode_id}/              # e.g., 2025-01-15T10-22-01Z_d001
-        metadata.json                # Episode-level metadata
+      {episode_idx}_{timestamp}/ # e.g., 001_2025-01-15_10-22-01
+        metadata.json            # Episode-level metadata
         obs/
-          cam_front/
-            000001.jpg           # Camera frames
+          {camera_name}/         # e.g., cam_front, cam_top
+            000001.jpg           # Camera frames (sequence_number format)
             000002.jpg
             ...
-            timestamps.jsonl       # Frame timestamps
-          cam_top/
-            000001.jpg
-            000002.jpg
-            ...
-            timestamps.jsonl
+            timestamps.jsonl     # Frame timestamps with sequence numbers
           leader_trajectory.jsonl    # Leader arm joint positions
           follower_trajectory.jsonl  # Follower arm joint positions
-        video_cam_front.mp4      # Generated video from frames
-        video_cam_top.mp4
+        video_{camera_name}.mp4  # Generated video from frames
         sync_logs.jsonl          # Synchronization data
-        recorder_metrics.jsonl   # Performance metrics
+        recorder_metrics.jsonl   # Performance metrics (currently unused)
 ```
 
 ## File Formats
@@ -53,36 +47,47 @@ datasets/
 
 ```json
 {
-  "episode_id": "episode_001_2025-01-15_10-22-01",
+  "episode_id": "001_2025-01-15_10-22-01",
+  "episode_idx": 1,
   "start_time": "2025-01-15T10:22:01.123456+00:00",
   "end_time": "2025-01-15T10:22:31.456789+00:00",
   "duration_s": 30.333333,
-  "run_mode": "teleop",  // or "policy"
+  "run_mode": "teleop",
   "fps": 30,
+  "actual_fps": 29.8,
   "leader_id": "leader_arm",
   "follower_id": "follower_arm",
   "total_frames": 910,
   "cameras": ["cam_front", "cam_top"],
   "task_description": "Pick and place red cube",
-  "policy": {  // Only present if run_mode is "policy"
+  "events": [
+    [1642248125.456, "WARNING_EMERGENCY_STOP_PRESSED"]
+  ],
+  "policy": {
     "policy_path": "/path/to/policy",
     "policy_name": "PolicyClassName"
   }
 }
 ```
 
+**Notes:**
+- `episode_idx`: Numeric episode index
+- `actual_fps`: Calculated FPS based on recorded timestamps
+- `events`: List of [timestamp, event_name] tuples for significant events during recording
+- `policy`: Only present if `run_mode` is "policy"
+
 ### Camera timestamps (`timestamps.jsonl`)
 
 ```json
-{"timestamp": 1642248121.123, "frame_idx": 1}
+{"sequence_number": 1, "timestamp": 1642248121.123}
 ```
 ### Trajectory Data (`*_trajectory.jsonl`)
 
 Each line is a JSON object representing one trajectory point:
 
 ```json
-{"timestamp": 1642248121.123, "frame_idx": 1, "joint_0.pos": 0.1, "joint_1.pos": 0.2, "joint_2.pos": -0.1}
-{"timestamp": 1642248121.156, "frame_idx": 2, "joint_0.pos": 0.11, "joint_1.pos": 0.21, "joint_2.pos": -0.09}
+{"sequence_number": 1, "timestamp": 1642248121.123, "joint_0.pos": 0.1, "joint_1.pos": 0.2, "joint_2.pos": -0.1}
+{"sequence_number": 2, "timestamp": 1642248121.156, "joint_0.pos": 0.11, "joint_1.pos": 0.21, "joint_2.pos": -0.09}
 ```
 
 ### Manifest (`manifest.jsonl`)
@@ -90,64 +95,96 @@ Each line is a JSON object representing one trajectory point:
 Each line describes one episode:
 
 ```json
-{"episode_id": "episode_001_2025-01-15_10-22-01", "episode_dir": "episodes/episode_001_2025-01-15_10-22-01", "task_description": "Pick red cube", "duration_s": 30.33, "total_frames": 910, "cameras": ["cam_front", "cam_top"], "start_time": "2025-01-15T10:22:01+00:00", "end_time": "2025-01-15T10:22:31+00:00"}
+{"episode_id": "001_2025-01-15_10-22-01", "episode_dir": "episodes/001_2025-01-15_10-22-01", "task_description": "Pick red cube", "duration_s": 30.33, "total_frames": 910, "actual_fps": 29.8, "cameras": ["cam_front", "cam_top"], "start_time": "2025-01-15T10:22:01+00:00", "end_time": "2025-01-15T10:22:31+00:00"}
 ```
 
 ### Splits (`splits.yaml`)
 
 ```yaml
 train:
-  - "2025-01-15T10-22-01Z_d001"
-  - "2025-01-15T10-25-15Z_d001"
+  - "001_2025-01-15_10-22-01"
+  - "002_2025-01-15_10-25-15"
 val_id:
-  - "2025-01-15T10-30-22Z_d001"
+  - "003_2025-01-15_10-30-22"
 val_ood: []
 ```
 
 ### Sync Logs (`sync_logs.jsonl`)
-NOTE: For now all the timestamps will be the same, because LeRobot doesn't actually surface async camera timestamps, and joint positions are read synchronously.
-
-TODO(sherry): Surface camera timestamps to monitor recorder performance.
 
 Each line contains synchronization information for one frame:
 
 ```json
-{"sequence_number": 1, "timestamp": 1642248121.123, "frame_idx": 1, "camera_timestamps": {"cam_front": 1642248121.120, "cam_top": 1642248121.121}, "leader_timestamp": 1642248121.123, "follower_timestamp": 1642248121.123}
+{"sequence_number": 1, "timestamp": 1642248121.123, "robot_state_timestamp": 1642248121.120, "camera_timestamps": {"cam_front": 1642248121.120, "cam_top": 1642248121.121}, "action_timestamp": 1642248121.123}
 ```
 
 ### Recorder Metrics (`recorder_metrics.jsonl`)
 
-Performance metrics logged during recording:
+Performance metrics logged during recording (currently unused in implementation):
 
 ```json
-{"timestamp": 1642248121.123, "frame_idx": 100, "fps": 29.8, "dropped_frames": 2, "memory_usage_mb": 150.5}
+{"timestamp": 1642248121.123, "sequence_number": 100, "fps": 29.8, "dropped_frames": 2, "memory_usage_mb": 150.5}
 ```
 
 ## Usage
 
-### Enabling Raw Format Recording
+### Programmatic Usage
 
-Add these flags to your `lerobot-record` command:
+The raw dataset recorder is used programmatically through the `RawDatasetRecorder` class:
 
-```bash
-lerobot-record \
-    --robot.type=so100_follower \
-    --robot.port=/dev/tty.usbmodem58760431541 \
-    --robot.cameras="{front: {type: opencv, index: 0, width: 640, height: 480}}" \
-    --robot.id=follower \
-    --dataset.repo_id=user/test-dataset \
-    --dataset.num_episodes=5 \
-    --dataset.single_task="Pick the red cube" \
-    --dataset.save_raw_format=true \
-    --dataset.raw_format_root=/path/to/raw/datasets \
-    --dataset.raw_format_videos=true
+```python
+from so101_bench.raw_dataset_recorder import RawDatasetRecorder
+
+# Initialize recorder
+recorder = RawDatasetRecorder(
+    dataset_name="my_dataset",
+    root_dir="/path/to/datasets",
+    robot_config=robot_config,
+    robot_calibration_fpath=Path("robot_calib.json"),
+    teleop_config=teleop_config,
+    teleop_calibration_fpath=Path("teleop_calib.json"),
+    fps=30,
+    save_videos=True,
+    image_writer_processes=4,
+    image_writer_threads=4
+)
+
+# Start episode
+episode_id = recorder.start_episode(
+    episode_idx=1,
+    run_mode="teleop",
+    leader_id="leader_arm",
+    follower_id="follower_arm"
+)
+
+# Add frames during recording
+recorder.add_frame(
+    observation=observation_dict,
+    action=action_dict,
+    frame_timestamp=timestamp,
+    sequence_number=frame_idx
+)
+
+# Add events (optional)
+recorder.add_event(
+    frame_timestamp=timestamp,
+    events={"emergency_stop": False}
+)
+
+# Save episode
+metadata = recorder.save_episode(task_description="Pick red cube")
+
+# Clean up
+recorder.cleanup()
 ```
 
 ### Configuration Options
 
-- `--dataset.save_raw_format=true`: Enable raw format recording
-- `--dataset.raw_format_root=/path`: Root directory for raw datasets (optional, defaults to dataset.root)
-- `--dataset.raw_format_videos=true`: Generate video files from camera frames (default: true)
+- `dataset_name`: Name of the dataset
+- `root_dir`: Root directory for raw datasets  
+- `fps`: Recording frame rate (default: 30)
+- `save_videos`: Generate video files from camera frames (default: True)
+- `image_writer_processes`: Number of processes for async image writing (default: 0)
+- `image_writer_threads`: Number of threads per camera for image writing (default: 4)
 
 ## Benefits
 
@@ -180,8 +217,8 @@ from pathlib import Path
 import yaml
 
 # Load episode metadata
-episode_dir = Path("datasets/my_dataset/episodes/2025-01-15T10-22-01Z_d001")
-with open(episode_dir / "meta.json") as f:
+episode_dir = Path("datasets/my_dataset/episodes/001_2025-01-15_10-22-01")
+with open(episode_dir / "metadata.json") as f:
     meta = json.load(f)
 
 # Load trajectory data
