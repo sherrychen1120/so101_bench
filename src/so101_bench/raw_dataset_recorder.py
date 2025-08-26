@@ -214,7 +214,7 @@ class RawDatasetRecorder:
         self,
         observation: Dict[str, Any],
         action: Dict[str, Any],
-        timestamp: float,
+        frame_timestamp: float,
         sequence_number: int,
     ):
         """
@@ -223,7 +223,7 @@ class RawDatasetRecorder:
         Args:
             observation: Robot observation data including camera images
             action: Robot action data
-            timestamp: Frame timestamp
+            frame_timestamp: Frame timestamp
             sequence_number: Frame sequence number
         """
         if self.current_episode is None:
@@ -231,57 +231,64 @@ class RawDatasetRecorder:
         
         # Process camera observations
         for cam_name, cam_data in observation.items():
-            if "cam" in cam_name:
-                # Extract camera name (e.g., "observation.images.cam_front" -> "cam_front")
-                camera_key = cam_name.split(".")[-1]
+            if "cam" not in cam_name:
+                continue
+
+            if cam_name.endswith("_timestamp"):
+                camera_key = cam_name.split("_timestamp")[0]
+                if camera_key not in self.camera_timestamps:
+                    self.camera_timestamps[camera_key] = []
+
+                self.camera_timestamps[camera_key].append(cam_data)
+                continue
+
+            camera_key = cam_name
+
+            # Create camera directory
+            cam_dir = self.current_episode_dir / "obs" / camera_key
+            cam_dir.mkdir(exist_ok=True)
+            
+            # Save image
+            if not isinstance(cam_data, np.ndarray):
+                logging.warning(f"Camera {cam_name} data is not a numpy array: {cam_data}")
+                # Skipping this frame
+                return
+            
+            # Convert numpy array to PIL Image
+            if cam_data.dtype == np.uint8 and len(cam_data.shape) == 3:
+                # RGB image
+                image = Image.fromarray(cam_data)
+            else:
+                # Convert to uint8 if needed
+                if cam_data.max() <= 1.0:
+                    cam_data = (cam_data * 255).astype(np.uint8)
+                image = Image.fromarray(cam_data.astype(np.uint8))
+            
+            # Save image
+            image_path = cam_dir / f"{sequence_number:06d}.jpg"
+            if self.image_writer:
+                self.image_writer.save_image(image=image, fpath=image_path)
+            else:
+                image.save(image_path, "JPEG", quality=95)
+            
+            # Store for video creation
+            if self.save_videos:
+                if camera_key not in self.camera_frame_buffers:
+                    self.camera_frame_buffers[camera_key] = []
                 
-                # Create camera directory
-                cam_dir = self.current_episode_dir / "obs" / camera_key
-                cam_dir.mkdir(exist_ok=True)
+                # Convert PIL image back to numpy for video
+                frame_array = np.array(image)
+                if len(frame_array.shape) == 3:
+                    # Convert RGB to BGR for OpenCV
+                    frame_array = cv2.cvtColor(frame_array, cv2.COLOR_RGB2BGR)
                 
-                # Save image
-                if not isinstance(cam_data, np.ndarray):
-                    logging.warning(f"Camera {cam_name} data is not a numpy array: {cam_data}")
-                    # Skipping this frame
-                    return
-                
-                # Convert numpy array to PIL Image
-                if cam_data.dtype == np.uint8 and len(cam_data.shape) == 3:
-                    # RGB image
-                    image = Image.fromarray(cam_data)
-                else:
-                    # Convert to uint8 if needed
-                    if cam_data.max() <= 1.0:
-                        cam_data = (cam_data * 255).astype(np.uint8)
-                    image = Image.fromarray(cam_data.astype(np.uint8))
-                
-                # Save image
-                image_path = cam_dir / f"{sequence_number:06d}.jpg"
-                if self.image_writer:
-                    self.image_writer.save_image(image=image, fpath=image_path)
-                else:
-                    image.save(image_path, "JPEG", quality=95)
-                
-                # Store for video creation
-                if self.save_videos:
-                    if camera_key not in self.camera_frame_buffers:
-                        self.camera_frame_buffers[camera_key] = []
-                        self.camera_timestamps[camera_key] = []
-                    
-                    # Convert PIL image back to numpy for video
-                    frame_array = np.array(image)
-                    if len(frame_array.shape) == 3:
-                        # Convert RGB to BGR for OpenCV
-                        frame_array = cv2.cvtColor(frame_array, cv2.COLOR_RGB2BGR)
-                    
-                    self.camera_frame_buffers[camera_key].append(frame_array)
-                    self.camera_timestamps[camera_key].append(timestamp)
+                self.camera_frame_buffers[camera_key].append(frame_array)
         
         # Save camera timestamps
-        for cam_name in self.camera_timestamps:
+        for cam_name, cam_timestamp in self.camera_timestamps.items():
             timestamp_file = self.current_episode_dir / "obs" / cam_name / "timestamps.jsonl"
             with jsonlines.open(timestamp_file, "a") as writer:
-                writer.write({"timestamp": timestamp, "sequence_number": sequence_number})
+                writer.write({"sequence_number": sequence_number, "timestamp": cam_timestamp})
         
         # Process arm trajectories
         leader_joints = {}
@@ -298,16 +305,16 @@ class RawDatasetRecorder:
         # Add trajectory points
         if leader_joints:
             leader_point = {
-                "timestamp": timestamp,
                 "sequence_number": sequence_number,
+                "timestamp": action["action_timestamp"],
                 **leader_joints
             }
             self.leader_trajectory.append(leader_point)
         
         if follower_joints:
             follower_point = {
-                "timestamp": timestamp,
                 "sequence_number": sequence_number,
+                "timestamp": observation["robot_state_timestamp"],
                 **follower_joints
             }
             self.follower_trajectory.append(follower_point)
@@ -315,11 +322,11 @@ class RawDatasetRecorder:
         # Add sync log entry
         sync_entry = {
             "sequence_number": sequence_number,
-            "timestamp": timestamp,
+            "timestamp": frame_timestamp,
+            "robot_state_timestamp": observation["robot_state_timestamp"],
             "camera_timestamps": {cam: self.camera_timestamps[cam][-1] 
                                 for cam in self.camera_timestamps},
-            "leader_timestamp": timestamp if leader_joints else None,
-            "follower_timestamp": timestamp if follower_joints else None,
+            "action_timestamp": action["action_timestamp"],
         }
         self.sync_logs.append(sync_entry)
         self.frame_count += 1
