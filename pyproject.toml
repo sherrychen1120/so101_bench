@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "so101_bench"
+version = "0.0.1"
+description = "SO-101 Bench: IL/VLA/RL eval + data tools"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Sherry Chen" }]
+dependencies = [
+  "numpy",
+  "opencv-python",
+  "pyyaml",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["so101_bench*"]
