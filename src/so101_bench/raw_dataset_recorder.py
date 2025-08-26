@@ -1,22 +1,9 @@
 #!/usr/bin/env python
-
-# Copyright 2024 The HuggingFace Inc. team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 """
 Raw dataset recorder for LeRobot that saves data in a human-readable format
 for easy debugging, visualization, and training other models.
+
+See docs/raw_dataset_format.md for the output format.
 """
 
 import json
@@ -41,6 +28,10 @@ class RawDatasetRecorder:
     METADATA_FILENAME = "metadata.json"
     SPLITS_FILENAME = "splits.yaml"
     MANIFEST_FILENAME = "manifest.jsonl"
+
+    EVENTS_TO_RECORD = {
+        "emergency_stop": "WARNING_EMERGENCY_STOP_PRESSED",
+    }
     
     def __init__(
         self,
@@ -102,6 +93,19 @@ class RawDatasetRecorder:
         # Initialize manifest file
         self.manifest_file = self.dataset_dir / self.MANIFEST_FILENAME
         
+        self._reset_episode_data()
+        
+        # Image writer for async image saving
+        self.image_writer = None
+        if image_writer_processes > 0 or image_writer_threads > 0:
+            self.image_writer = AsyncImageWriter(
+                num_processes=image_writer_processes,
+                num_threads=image_writer_threads
+            )
+        
+        logging.info(f"Raw dataset recorder initialized at {self.dataset_dir}")
+    
+    def _reset_episode_data(self):
         # Current episode data
         self.current_episode = None
         self.current_episode_dir = None
@@ -115,21 +119,14 @@ class RawDatasetRecorder:
         # Trajectory buffers
         self.leader_trajectory = []
         self.follower_trajectory = []
+
+        # Events. List of tuples of (event_timestamp, event_name)
+        self.events = []
         
         # Sync and metrics logs
         self.sync_logs = []
         self.recorder_metrics = []
-        
-        # Image writer for async image saving
-        self.image_writer = None
-        if image_writer_processes > 0 or image_writer_threads > 0:
-            self.image_writer = AsyncImageWriter(
-                num_processes=image_writer_processes,
-                num_threads=image_writer_threads
-            )
-        
-        logging.info(f"Raw dataset recorder initialized at {self.dataset_dir}")
-    
+
     def _save_arm_calibration(self, calibration_fpath: Path, arm_config: dict):
         incoming_calib = json.load(open(calibration_fpath))
         calibration_write_path = self.arm_calib_dir / f"{arm_config['id']}.json"
@@ -170,6 +167,8 @@ class RawDatasetRecorder:
         timestamp = datetime.now(timezone.utc)
         episode_id = f"{episode_idx:03d}" + "_" + timestamp.strftime("%Y-%m-%d_%H-%M-%S")
         
+        assert self.current_episode is None, f"Episode already started: {self.current_episode}"
+
         self.current_episode = episode_id
         self.current_episode_dir = self.episodes_dir / episode_id
         self.current_episode_dir.mkdir(exist_ok=True)
@@ -197,19 +196,26 @@ class RawDatasetRecorder:
         with open(metadata_file, "w") as f:
             json.dump(episode_metadata, f, indent=2)
         
-        # Reset episode data
-        self.episode_start_time = time.time()
-        self.frame_count = 0
-        self.camera_frame_buffers = {}
-        self.camera_timestamps = {}
-        self.leader_trajectory = []
-        self.follower_trajectory = []
-        self.sync_logs = []
-        self.recorder_metrics = []
-        
         logging.info(f"Started recording episode: {episode_id}")
         return episode_id
     
+    def add_event(
+        self,
+        frame_timestamp: float,
+        events: Dict[str, bool],
+    ):
+        """
+        Add an event to the current episode.
+    
+        Args:
+            frame_timestamp: Frame timestamp
+            events: Events from the control loop. 
+                Keyed by event name. True if the event is triggered.
+        """
+        for event_name, triggered in events.items():
+            if event_name in self.EVENTS_TO_RECORD and triggered:
+                self.events.append((frame_timestamp, self.EVENTS_TO_RECORD[event_name]))
+
     def add_frame(
         self,
         observation: Dict[str, Any],
@@ -394,6 +400,7 @@ class RawDatasetRecorder:
             "actual_fps": actual_fps,
             "task_description": task_description,
             "cameras": list(self.camera_frame_buffers.keys()),
+            "events": self.events,
         })
         
         with open(meta_file, "w") as f:
@@ -417,11 +424,7 @@ class RawDatasetRecorder:
         
         logging.info(f"Saved episode {episode_id} with {self.frame_count} frames")
         
-        # Reset current episode
-        self.current_episode = None
-        self.current_episode_dir = None
-        self.episode_start_time = None
-        self.frame_count = 0
+        self._reset_episode_data()
         
         return episode_metadata
     
