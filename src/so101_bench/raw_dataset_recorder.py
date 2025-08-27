@@ -29,6 +29,7 @@ class RawDatasetRecorder:
     METADATA_FILENAME = "metadata.json"
     SPLITS_FILENAME = "splits.yaml"
     MANIFEST_FILENAME = "manifest.jsonl"
+    TASK_CONFIG_FILENAME = "task_config.yaml"
 
     EVENTS_TO_RECORD = {
         "emergency_stop": "WARNING_EMERGENCY_STOP_PRESSED",
@@ -70,7 +71,7 @@ class RawDatasetRecorder:
         self.save_videos = save_videos
         
         # Create dataset directory structure
-        self.dataset_dir = self.root_dir / "datasets" / dataset_name
+        self.dataset_dir = self.root_dir / dataset_name
         self.dataset_dir.mkdir(parents=True, exist_ok=True)
         
         # Create subdirectories
@@ -174,6 +175,7 @@ class RawDatasetRecorder:
         policy_info: Optional[Dict[str, Any]] = None,
         leader_id: Optional[str] = None,
         follower_id: Optional[str] = None,
+        task_config: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Start recording a new episode.
@@ -184,6 +186,7 @@ class RawDatasetRecorder:
             policy_info: Policy information if run_mode is "policy"
             leader_id: Leader arm ID
             follower_id: Follower arm ID
+            task_config: Task configuration dictionary to save with episode
             
         Returns:
             Episode ID string
@@ -220,6 +223,13 @@ class RawDatasetRecorder:
         metadata_file = self.current_episode_dir / self.METADATA_FILENAME
         with open(metadata_file, "w") as f:
             json.dump(episode_metadata, f, indent=2)
+        
+        # Save task configuration if provided
+        if task_config is not None:
+            task_config_file = self.current_episode_dir / self.TASK_CONFIG_FILENAME
+            with open(task_config_file, "w") as f:
+                yaml.dump(task_config, f, default_flow_style=False, sort_keys=False)
+            logging.info(f"Saved task configuration for episode: {episode_id}")
         
         logging.info(f"Started recording episode: {episode_id}")
         return episode_id

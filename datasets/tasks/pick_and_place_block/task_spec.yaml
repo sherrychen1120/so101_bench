@@ -1,0 +1,34 @@
+# A `task_spec` defines the available variations of a task.
+# It also defines the metrics to evaluate the performance of the task.
+task_name: "pick_and_place_block"
+variations:
+  block: ["white", "green", "grey", "eraser"]
+  container: ["tupperware", "bowl", "box"]
+  start_pose: # [x, y, yaw(deg)]
+    # All blocks align longer edge with y axis at yaw = 0.
+    block:
+      min: [0.0, 0.0, -90.0]
+      max: [0.4, 0.32, 90.0]
+    container:
+      min: [0.0, 0.0, -90.0]
+      max: [0.4, 0.32, 90.0]
+  
+metrics_definition:
+  task_progress_to_score:
+    0_reach_block: 0.2
+    1_grasp_block: 0.4
+    2_reach_container: 0.7
+    3_release_block: 0.8
+    4_block_in_container: 1.0
+
+# Example of in-distribution and out-of-distribution variations 
+# that can be generated for a given dataset and a split.
+
+# id_variations:
+#   block: ["white"]
+#   container: ["tupperware"]
+#   start_pose: null  # use all from default
+# ood_variations:
+#   block: ["green", "grey", "eraser"]
+#   container: ["bowl", "box"]
+#   start_pose: null  # use all from default
