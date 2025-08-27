@@ -21,7 +21,7 @@ import numpy as np
 import yaml
 from PIL import Image
 
-from so101_bench.image_writer import AsyncImageWriter
+from lerobot.datasets.image_writer import AsyncImageWriter
 
 
 class RawDatasetRecorder:
