@@ -38,6 +38,9 @@ class RawDatasetRecorder:
         self,
         dataset_name: str,
         root_dir: str | Path,
+        is_resume: bool,
+        # TODO(sherry): Just pass in RobotConfig and TeleoperatorConfig
+        # instead of dictionaries.
         robot_config: Dict[str, Any],
         robot_calibration_fpath: Path,
         teleop_config: Dict[str, Any],
@@ -71,14 +74,14 @@ class RawDatasetRecorder:
         
         # Create dataset directory structure
         self.dataset_dir = self.root_dir / dataset_name
-        self.dataset_dir.mkdir(parents=True, exist_ok=True)
+        self.dataset_dir.mkdir(parents=True, exist_ok=is_resume)
         
         # Create subdirectories
         self.episodes_dir = self.dataset_dir / "episodes"
-        self.episodes_dir.mkdir(exist_ok=True)
+        self.episodes_dir.mkdir(exist_ok=is_resume)
         
         self.arm_calib_dir = self.dataset_dir / "arm_calib"
-        self.arm_calib_dir.mkdir(exist_ok=True)
+        self.arm_calib_dir.mkdir(exist_ok=is_resume)
 
         # Save leader and follower arm calibration
         self._save_arm_calibration(robot_calibration_fpath, robot_config)
@@ -90,7 +93,7 @@ class RawDatasetRecorder:
         # Initialize manifest file
         self.manifest_file = self.dataset_dir / self.MANIFEST_FILENAME
         
-        self._reset_episode_data()
+        self.reset_episode_data()
         
         # Image writer for async image saving
         self.image_writer = None
@@ -102,12 +105,13 @@ class RawDatasetRecorder:
         
         logging.info(f"Raw dataset recorder initialized at {self.dataset_dir}")
     
-    def _reset_episode_data(self):
+    def reset_episode_data(self):
         # Current episode data
         self.current_episode = None
         self.current_episode_dir = None
         self.episode_start_time = None
         self.frame_count = 0
+        self.task_config = None
         
         # Camera frame buffers for video creation
         self.camera_frame_buffers = {}
@@ -184,8 +188,19 @@ class RawDatasetRecorder:
             Episode ID string
         """
         # Generate episode ID with timestamp
-        timestamp = datetime.now(timezone.utc)
+        timestamp = datetime.now()
         episode_id = f"{episode_idx:03d}" + "_" + timestamp.strftime("%Y-%m-%d_%H-%M-%S")
+        # Save task configuration if provided
+        
+        if (
+            task_config is not None
+            and "is_eval" in task_config
+            and task_config["is_eval"]
+        ):
+            source_episode_dir = task_config["source_episode_dir"]
+            source_dataset_name = source_episode_dir.split("/")[0]
+            source_episode_id = source_episode_dir.split("/")[-1]
+            episode_id = f"{source_dataset_name}__{source_episode_id}__eval__" + episode_id
         
         assert self.current_episode is None, f"Episode already started: {self.current_episode}"
 
@@ -216,8 +231,8 @@ class RawDatasetRecorder:
         with open(metadata_file, "w") as f:
             json.dump(episode_metadata, f, indent=2)
         
-        # Save task configuration if provided
         if task_config is not None:
+            self.task_config = task_config
             task_config_file = self.current_episode_dir / self.TASK_CONFIG_FILENAME
             with open(task_config_file, "w") as f:
                 yaml.dump(task_config, f, default_flow_style=False, sort_keys=False)
@@ -445,13 +460,20 @@ class RawDatasetRecorder:
             "start_time": episode_metadata["start_time"],
             "end_time": episode_metadata["end_time"],
         }
+        if(
+            self.task_config 
+            and "is_eval" in self.task_config 
+            and self.task_config["is_eval"]
+        ):
+            manifest_entry["is_eval"] = True
+            manifest_entry["source_episode_dir"] = self.task_config["source_episode_dir"]
         
         with jsonlines.open(self.manifest_file, "a") as writer:
             writer.write(manifest_entry)
         
         logging.info(f"Saved episode {episode_id} with {self.frame_count} frames")
         
-        self._reset_episode_data()
+        self.reset_episode_data()
         
         return episode_metadata
     

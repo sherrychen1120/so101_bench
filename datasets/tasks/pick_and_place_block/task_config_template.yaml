@@ -6,3 +6,6 @@ variations:
   start_pose: 
     block: [0.0, 0.0, 0.0]
     container: [0.0, 0.0, 0.0]
+
+is_eval: false
+source_episode_dir: ""

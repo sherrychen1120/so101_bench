@@ -68,7 +68,7 @@ lerobot-record \
 import logging
 import time
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from pathlib import Path
 from pprint import pformat
 
@@ -123,98 +123,7 @@ from lerobot.utils.visualization_utils import _init_rerun, log_rerun_data
 
 from so101_bench.raw_dataset_recorder import RawDatasetRecorder
 from so101_bench.task_configurator import TaskConfigurator
-
-@dataclass
-class DatasetRecordConfig:
-    # Dataset identifier. By convention it should match '{hf_username}/{dataset_name}' (e.g. `lerobot/test`).
-    repo_id: str
-    # A short but accurate description of the task performed during the recording (e.g. "Pick the Lego block and drop it in the box on the right.")
-    single_task: str
-    # Root directory where the dataset will be stored (e.g. 'dataset/path').
-    root: str | Path | None = None
-    # Limit the frames per second.
-    fps: int = 30
-    # Number of seconds for data recording for each episode.
-    episode_time_s: int | float = 60
-    # Number of seconds for resetting the environment after each episode.
-    reset_time_s: int | float = 60
-    # Number of episodes to record.
-    num_episodes: int = 50
-    # Encode frames in the dataset into video
-    video: bool = True
-    # Upload dataset to Hugging Face hub.
-    push_to_hub: bool = True
-    # Upload on private repository on the Hugging Face hub.
-    private: bool = False
-    # Add tags to your dataset on the hub.
-    tags: list[str] | None = None
-    # Number of subprocesses handling the saving of frames as PNG. Set to 0 to use threads only;
-    # set to ≥1 to use subprocesses, each using threads to write images. The best number of processes
-    # and threads depends on your system. We recommend 4 threads per camera with 0 processes.
-    # If fps is unstable, adjust the thread count. If still unstable, try using 1 or more subprocesses.
-    num_image_writer_processes: int = 0
-    # Number of threads writing the frames as png images on disk, per camera.
-    # Too many threads might cause unstable teleoperation fps due to main thread being blocked.
-    # Not enough threads might cause low camera fps.
-    num_image_writer_threads_per_camera: int = 4
-    # Number of episodes to record before batch encoding videos
-    # Set to 1 for immediate encoding (default behavior), or higher for batched encoding
-    video_encoding_batch_size: int = 1
-    
-    # Enable raw dataset format recording alongside LeRobot format
-    save_raw_format: bool = False
-    # Root directory for raw format datasets (defaults to root if not specified)
-    raw_format_root: str | Path | None = None
-    # Save videos in raw format
-    raw_format_videos: bool = True
-    # Directory containing task specifications and templates
-    tasks_dir: str | Path | None = None
-    # Name of the specific task to use for configuration
-    task_name: str | None = None
-
-    def __post_init__(self):
-        if self.single_task is None:
-            raise ValueError("You need to provide a task as argument in `single_task`.")
-        
-        # Validate task configuration options
-        if self.save_raw_format:
-            if (self.tasks_dir is None) != (self.task_name is None):
-                raise ValueError("Both tasks_dir and task_name must be provided together or neither should be provided.")
-        elif self.tasks_dir is not None or self.task_name is not None:
-            raise ValueError("tasks_dir and task_name can only be used when save_raw_format=True.")
-
-
-@dataclass
-class RecordConfig:
-    robot: RobotConfig
-    dataset: DatasetRecordConfig
-    # Whether to control the robot with a teleoperator
-    teleop: TeleoperatorConfig | None = None
-    # Whether to control the robot with a policy
-    policy: PreTrainedConfig | None = None
-    # Display all cameras on screen
-    display_data: bool = False
-    # Use vocal synthesis to read events.
-    play_sounds: bool = True
-    # Resume recording on an existing dataset.
-    resume: bool = False
-
-    def __post_init__(self):
-        # HACK: We parse again the cli args here to get the pretrained path if there was one.
-        policy_path = parser.get_path_arg("policy")
-        if policy_path:
-            cli_overrides = parser.get_cli_overrides("policy")
-            self.policy = PreTrainedConfig.from_pretrained(policy_path, cli_overrides=cli_overrides)
-            self.policy.pretrained_path = policy_path
-
-        if self.teleop is None and self.policy is None:
-            raise ValueError("Choose a policy, a teleoperator or both to control the robot")
-
-    @classmethod
-    def __get_path_fields__(cls) -> list[str]:
-        """This enables the parser to load config from the policy using `--policy.path=local/dir`"""
-        return ["policy"]
-
+from so101_bench.record_configs import RecordConfig
 
 @safe_stop_image_writer
 def record_loop(
@@ -368,6 +277,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
         raw_recorder = RawDatasetRecorder(
             dataset_name=dataset_name,
             root_dir=raw_root,
+            is_resume=cfg.resume,
             robot_config=asdict(cfg.robot),
             robot_calibration_fpath=robot.calibration_fpath,
             teleop_config=asdict(cfg.teleop),
@@ -497,9 +407,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                 dataset.clear_episode_buffer()
                 # Clear raw recorder episode if needed
                 if raw_recorder is not None:
-                    raw_recorder.current_episode = None
-                    raw_recorder.current_episode_dir = None
-                    raw_recorder.frame_count = 0
+                    raw_recorder.reset_episode_data()
                 continue
 
             # Stop keyboard listener at the end of each episode.
