@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import time
+from deepdiff import DeepDiff
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -82,6 +83,9 @@ class RawDatasetRecorder:
         # Save leader and follower arm calibration
         self._save_arm_calibration(robot_calibration_fpath, robot_config)
         self._save_arm_calibration(teleop_calibration_fpath, teleop_config)
+
+        # Save camera configs
+        self._save_camera_configs(robot_config)
         
         # Initialize splits file if it doesn't exist
         self.splits_file = self.dataset_dir / self.SPLITS_FILENAME
@@ -136,11 +140,32 @@ class RawDatasetRecorder:
             # Direct comparison is possible because all numeric values are ints.
             if existing_calib != incoming_calib:
                 raise ValueError(f"Cannot record to same dataset_dir: "
-                f"{self.dataset_dir} with different calibration for "
-                f"{arm_config['id']}: {existing_calib} != {incoming_calib}")
+                    f"{self.dataset_dir} with different calibration for "
+                    f"{arm_config['id']}: {existing_calib} != {incoming_calib}"
+                )
         else:
             with open(calibration_write_path, "w") as f:
                 json.dump(incoming_calib, f, indent=2)
+    
+    def _save_camera_configs(self, robot_config: dict):
+        configs_write_path = self.dataset_dir / "camera_configs.json"
+        
+        if os.path.exists(configs_write_path):
+            existing_configs = json.load(open(configs_write_path))
+            # Go through a json conversion to convert everything to primitive types
+            # in order to compare them.
+            incoming_configs = json.loads(json.dumps(robot_config["cameras"], indent=2))
+            # Approximate comparison of camera configs.
+            diff = DeepDiff(existing_configs, incoming_configs, significant_digits=3)
+
+            if diff:
+                raise ValueError(f"Cannot record to same dataset_dir: "
+                    f"{self.dataset_dir} with different camera configs: "
+                    f"{diff}"
+                )
+        else:
+            with open(configs_write_path, "w") as f:
+                json.dump(robot_config["cameras"], f, indent=2)
 
     def start_episode(
         self,
