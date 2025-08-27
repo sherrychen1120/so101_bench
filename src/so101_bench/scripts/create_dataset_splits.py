@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
 Script to create split files for raw datasets.
 
@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 import sys
 
+from so101_bench.file_utils import load_yaml, save_yaml
+
 DEFAULT_TRAIN_RATIO = 0.8
 DEFAULT_VAL_ID_RATIO = 0.2
 DEFAULT_RANDOM_SEED = 42
@@ -23,30 +25,19 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create dataset splits for raw dataset")
     parser.add_argument("--raw_dataset_dir", type=str, 
                        help="Path to raw dataset directory")
-    parser.add_argument("--id-ood-config", type=str, required=True,
+    parser.add_argument("--id_ood_config", type=str, required=True,
                        help="Path to ID/OOD task configuration file")
-    parser.add_argument("--train-ratio", type=float, default=DEFAULT_TRAIN_RATIO,
+    parser.add_argument("--train_ratio", type=float, default=DEFAULT_TRAIN_RATIO,
                        help=f"Ratio of ID episodes to use for training (default: {DEFAULT_TRAIN_RATIO})")
-    parser.add_argument("--val-id-ratio", type=float, default=DEFAULT_VAL_ID_RATIO,
+    parser.add_argument("--val_id_ratio", type=float, default=DEFAULT_VAL_ID_RATIO,
                        help=f"Ratio of ID episodes to use for validation (default: {DEFAULT_VAL_ID_RATIO})")
-    parser.add_argument("--task-directory", type=str, 
+    parser.add_argument("--task_directory", type=str, 
                        default=DEFAULT_TASK_DIRECTORY,
                        help=f"Path to task directory (default: {DEFAULT_TASK_DIRECTORY})")
     parser.add_argument("--seed", type=int, default=DEFAULT_RANDOM_SEED,
                        help=f"Random seed for reproducible splits (default: {DEFAULT_RANDOM_SEED})")
     
     return parser.parse_args()
-
-def load_yaml(file_path: Path) -> dict:
-    """Load YAML file."""
-    with open(file_path, 'r') as f:
-        return yaml.safe_load(f)
-
-
-def save_yaml(data: dict, file_path: Path):
-    """Save data to YAML file."""
-    with open(file_path, 'w') as f:
-        yaml.dump(data, f, default_flow_style=False, indent=2)
 
 
 def load_episode_task_config(episode_dir: Path) -> dict:
@@ -383,7 +374,7 @@ def create_splits_file(dataset_dir: Path, id_variations: Dict[str, List[str]], o
     
     # Create splits data structure
     splits_data = {
-        'train_id': sorted(train_episodes),
+        'train': sorted(train_episodes),
         'val_id': sorted(val_id_episodes),
         'val_ood': sorted(val_ood_episodes),
         'id_ood_task_config': {
