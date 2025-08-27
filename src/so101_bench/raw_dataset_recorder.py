@@ -27,7 +27,6 @@ from so101_bench.image_writer import AsyncImageWriter
 class RawDatasetRecorder:
     """Records robot data in a raw, human-readable format alongside LeRobot format."""
     METADATA_FILENAME = "metadata.json"
-    SPLITS_FILENAME = "splits.yaml"
     MANIFEST_FILENAME = "manifest.jsonl"
     TASK_CONFIG_FILENAME = "task_config.yaml"
 
@@ -87,13 +86,6 @@ class RawDatasetRecorder:
 
         # Save camera configs
         self._save_camera_configs(robot_config)
-        
-        # Initialize splits file if it doesn't exist
-        self.splits_file = self.dataset_dir / self.SPLITS_FILENAME
-        if not self.splits_file.exists():
-            splits = {"train": [], "val_id": [], "val_ood": []}
-            with open(self.splits_file, "w") as f:
-                yaml.dump(splits, f, default_flow_style=False)
         
         # Initialize manifest file
         self.manifest_file = self.dataset_dir / self.MANIFEST_FILENAME
@@ -533,13 +525,6 @@ class RawDatasetRecorder:
                 logging.error(f"Error creating video {video_path}: {e}")
             finally:
                 video_writer.release()
-    
-    def update_splits(self, splits: Dict[str, List[str]]):
-        """Update the SPLITS_FILENAME file with episode assignments."""
-        with open(self.splits_file, "w") as f:
-            yaml.dump(splits, f, default_flow_style=False)
-        
-        logging.info("Updated dataset splits")
     
     def cleanup(self):
         """Clean up resources."""
