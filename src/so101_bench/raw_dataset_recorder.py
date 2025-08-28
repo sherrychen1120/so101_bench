@@ -4,6 +4,55 @@ Raw dataset recorder for LeRobot that saves data in a human-readable format
 for easy debugging, visualization, and training other models.
 
 See docs/raw_dataset_format.md for the output format.
+
+The raw dataset recorder is used programmatically through the `RawDatasetRecorder` class:
+
+Programmatic usage example:
+    ```python
+    from so101_bench.raw_dataset_recorder import RawDatasetRecorder
+
+    # Initialize recorder
+    recorder = RawDatasetRecorder(
+        dataset_name="my_dataset",
+        root_dir="/path/to/datasets",
+        robot_config=robot_config,
+        robot_calibration_fpath=Path("robot_calib.json"),
+        teleop_config=teleop_config,
+        teleop_calibration_fpath=Path("teleop_calib.json"),
+        fps=30,
+        save_videos=True,
+        image_writer_processes=4,
+        image_writer_threads=4
+    )
+
+    # Start episode
+    episode_id = recorder.start_episode(
+        episode_idx=1,
+        run_mode="teleop",
+        leader_id="leader_arm",
+        follower_id="follower_arm"
+    )
+
+    # Add frames during recording
+    recorder.add_frame(
+        observation=observation_dict,
+        action=action_dict,
+        frame_timestamp=timestamp,
+        sequence_number=frame_idx
+    )
+
+    # Add events (optional)
+    recorder.add_event(
+        frame_timestamp=timestamp,
+        events={"emergency_stop": False}
+    )
+
+    # Save episode
+    metadata = recorder.save_episode(task_description="Pick red cube")
+
+    # Clean up
+    recorder.cleanup()
+    ```
 """
 
 import json

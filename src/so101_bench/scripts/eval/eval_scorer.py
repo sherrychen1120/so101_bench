@@ -5,6 +5,14 @@ Evaluation scoring script for SO101 benchmark.
 This script processes evaluation datasets and allows manual labeling of progress stages
 through an interactive video player interface. It calculates various metrics including
 task progress scores, success rates, latency, and retry attempts.
+
+Example usage:
+python -m so101_bench.scripts.eval.eval_scorer \
+  --dataset_root_dir=/home/melon/sherry/so101_bench/datasets/recordings \
+  --task_root_dir=/home/melon/sherry/so101_bench/datasets/tasks \
+  --eval_set_name=2025-08-27_eval \
+  --eval_config_path=/home/melon/sherry/so101_bench/datasets/recordings/2025-08-27_eval/eval_config.yaml
+
 """
 
 import argparse
@@ -46,7 +54,7 @@ def get_episodes_from_dataset(dataset_dir: Path) -> List[str]:
     episodes = []
     for item in episodes_dir.iterdir():
         if item.is_dir():
-            episodes.append(item)
+            episodes.append(item.name)
     
     return sorted(episodes)
 
@@ -298,12 +306,12 @@ def process_episode(episode_idx: int, episode_count: int, episode_dir: Path, eva
     return eval_score_data
 
 
-def calculate_average_progress_stage_duration(all_episode_scores: List[Dict[str, Any]], 
+def calculate_average_progress_stage_duration(all_episode_scores: Dict[str, Dict[str, Any]], 
                                             task_spec: Dict[str, Any]) -> Dict[str, float]:
     """Calculate average duration for each progress stage across all episodes."""
     stage_durations = defaultdict(list)
     
-    for episode_score in all_episode_scores:
+    for _, episode_score in all_episode_scores.items():
         progress_stages = episode_score["episode_metrics"]["progress_stage_timerange_s"]
         
         for stage, intervals in progress_stages.items():
@@ -325,10 +333,9 @@ def calculate_average_progress_stage_duration(all_episode_scores: List[Dict[str,
     return avg_durations
 
 
-def calculate_dataset_metrics(all_episode_scores: List[Dict[str, Any]], 
+def calculate_dataset_metrics(all_episode_scores: Dict[str, Dict[str, Any]], 
                             eval_config: Dict[str, Any],
                             task_spec: Dict[str, Any],
-                            episodes: List[Path],
                             eval_set_name: str) -> Dict[str, Any]:
     """Calculate dataset-level metrics from all episode scores."""
     if not all_episode_scores:
@@ -342,7 +349,7 @@ def calculate_dataset_metrics(all_episode_scores: List[Dict[str, Any]],
     num_attempts = []
     frame_latencies = []
     
-    for episode_score in all_episode_scores:
+    for _, episode_score in all_episode_scores.items():
         metrics = episode_score["episode_metrics"]
         
         task_progress_scores.append(metrics["task_progress_score"])
@@ -380,7 +387,7 @@ def calculate_dataset_metrics(all_episode_scores: List[Dict[str, Any]],
         },
         "eval_set": {
             "dataset_id": eval_set_name,
-            "episodes_list": [ep.name for ep in episodes]
+            "episodes_list": list(all_episode_scores.keys())
         }
     }
     
@@ -449,7 +456,7 @@ def main():
     
     # Process each episode and collect scores
     logging.info(f"\nProcessing {len(episodes)} episodes...")
-    all_episode_scores = []
+    all_episode_scores = {}
     
     for i, episode_id in enumerate(episodes, 1):
         episode_dir = dataset_dir / "episodes" / episode_id
@@ -460,7 +467,7 @@ def main():
         try:
             episode_score = process_episode(i, len(episodes), episode_dir, eval_config, task_spec, args.force)
             if episode_score is not None:
-                all_episode_scores.append(episode_score)
+                all_episode_scores[episode_id] = episode_score
         except KeyboardInterrupt:
             print("\nInterrupted by user. Exiting.")
             sys.exit(1)
@@ -484,7 +491,7 @@ def main():
         print(f"{'='*60}")
         
         try:
-            dataset_metrics = calculate_dataset_metrics(all_episode_scores, eval_config, task_spec, episodes, args.eval_set_name)
+            dataset_metrics = calculate_dataset_metrics(all_episode_scores, eval_config, task_spec, args.eval_set_name)
             
             # Save dataset eval score as YAML and JSON
             save_yaml(dataset_metrics, dataset_eval_score_path)

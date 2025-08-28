@@ -4,6 +4,33 @@ Script to create evaluation datasets from existing recorded datasets.
 
 This script takes a source dataset with splits and creates a new evaluation dataset
 by copying selected episodes and modifying their task configurations for evaluation.
+
+Example usage:
+
+python -m so101_bench.scripts.eval.eval_rollout \
+    --robot.type=so101_follower \
+    --robot.port=/dev/so101_follower \
+    --robot.id=dum_e_follower \
+    --robot.camera_configs_path=/home/melon/sherry/so101_bench/bringup/camera_configs.json \
+    --robot.calibration_dir=/home/melon/sherry/lerobot/calibration/robots/so101_follower \
+    --teleop.type=so101_leader \
+    --teleop.port=/dev/so101_leader \
+    --teleop.calibration_dir=/home/melon/sherry/lerobot/calibration/teleoperators/so101_leader \
+    --teleop.id=dum_e_leader \
+    --display_data=true \
+    --dataset.repo_id=${HF_USER}/2025-08-25_test \
+    --dataset.push_to_hub=false \
+    --dataset.private=true \
+    --dataset.reset_time_s=5 \
+    --dataset.num_episodes=1 \
+    --dataset.single_task="Grab the block and put it in the container." \
+    --resume=true \
+    --dataset.save_raw_format=true \
+    --dataset.raw_format_root=/home/melon/sherry/so101_bench/datasets/recordings/ \
+    --dataset.raw_format_videos=true \
+    --eval_dataset.name=2025-08-27_eval \
+    --eval_dataset.splits='["val_id"]'
+
 """
 
 import logging
