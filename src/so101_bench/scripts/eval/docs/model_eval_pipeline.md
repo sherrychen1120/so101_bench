@@ -1,4 +1,4 @@
-# SO101 Evaluation Pipeline Documentation
+# SO101 Evaluation Pipeline
 
 This document describes the SO101 evaluation pipeline, including how to run evaluation rollouts and the file formats for inputs and outputs.
 
