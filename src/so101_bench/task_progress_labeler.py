@@ -9,12 +9,20 @@ import logging
 class TaskProgressLabeler:
     """Interactive video player for manual progress stage labeling with dual video support."""
     
-    def __init__(self, video_paths: List[Path], progress_stage_labels: list[str], fps: float = 30.0, horizon_s: float = None):
+    def __init__(
+        self, 
+        video_paths: List[Path], 
+        progress_stage_labels: list[str], 
+        fps: float = 30.0, 
+        horizon_s: float = None,
+        title: str = "",
+    ):
         self.video_paths = video_paths
         self.caps = {}
         self.total_frames = 0
         self.fps = fps
         self.horizon_s = horizon_s
+        self.title = title
         
         # Initialize video captures
         for i, video_path in enumerate(video_paths):
@@ -395,7 +403,7 @@ class TaskProgressLabeler:
 
     def play(self) -> dict[str, list[tuple[float, float]]]:
         """Start interactive video player and return labeled intervals."""
-        window_name = "Video Player - Manual Labeling"
+        window_name = f"{self.title}" if self.title else "Video Player - Manual Labeling"
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
         
         # Make window larger to accommodate visualization panel
@@ -442,6 +450,11 @@ class TaskProgressLabeler:
                 display_frame = np.vstack([video_frame, viz_panel])
                 
                 cv2.imshow(window_name, display_frame)
+                
+                # Check if window was closed externally
+                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+                    print("\nWindow was closed. Exiting labeler...")
+                    break
                 
                 # Handle keyboard input
                 key = cv2.waitKey(1 if self.is_playing else 0) & 0xFF
@@ -507,9 +520,10 @@ class TaskProgressLabeler:
             cap.release()
         
         # Validate final labels
+        result = {}
         if not self.is_valid():
             print("\n" + "="*50)
-            print("WARNING: Labels contain overlapping intervals!")
+            print("WARNING: Labels contain overlapping intervals! Discarding these labels.")
             overlaps = self.detect_overlaps()
             for stage, overlap_list in overlaps.items():
                 print(f"Stage '{stage}' has overlaps:")
@@ -519,13 +533,10 @@ class TaskProgressLabeler:
                     print(f"  - {stage} interval {self_idx} ({self_interval[0]:.2f}s-{self_interval[1]:.2f}s) "
                           f"overlaps with {other_stage} interval {other_idx} ({other_interval[0]:.2f}s-{other_interval[1]:.2f}s)")
             print("="*50)
+            return result
         else:
             print("\n✓ All labels are valid (no overlaps detected)")
-        
-        # Convert to the expected format
-        result = {}
-        for stage, intervals in self.labeled_intervals.items():
-            result[stage] = [[start, end] for start, end in intervals]
-        
-        return result
 
+            for stage, intervals in self.labeled_intervals.items():
+                result[stage] = [[start, end] for start, end in intervals]
+            return result

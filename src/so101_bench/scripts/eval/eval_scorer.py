@@ -116,14 +116,18 @@ def calculate_frame_latency_ms(sync_logs: List[Dict[str, Any]]) -> float:
     return sum(latencies) / len(latencies) if latencies else 0.0
 
 
-def calculate_num_attempts(progress_stages: Dict[str, List[float]]) -> int:
+def calculate_num_attempts(
+    progress_stage_labels: Dict[str, List[float]],
+    task_spec: Dict[str, Any],
+) -> int:
     """Calculate number of attempts based on progress stage sequences."""
     # Define the expected progress order
-    stage_order = ["0_reach_block", "1_grasp_block", "2_reach_container", "3_release_block", "4_block_in_container"]
+    score_definition = task_spec["score_definition"]["task_progress_score"]
+    stage_order = sorted(list(score_definition.keys()))
     
     # Create timeline of stages
     timeline = []
-    for stage, intervals in progress_stages.items():
+    for stage, intervals in progress_stage_labels.items():
         for start_time, end_time in intervals:
             timeline.append((start_time, stage))
     
@@ -138,6 +142,9 @@ def calculate_num_attempts(progress_stages: Dict[str, List[float]]) -> int:
         try:
             stage_idx = stage_order.index(stage)
             if stage_idx > current_max_stage:
+                # First stage of the sequence
+                if attempts == 0:
+                    attempts = 1
                 current_max_stage = stage_idx
             elif stage_idx <= current_max_stage:
                 # This is a retry - new attempt
@@ -147,7 +154,7 @@ def calculate_num_attempts(progress_stages: Dict[str, List[float]]) -> int:
             # Unknown stage, skip
             continue
     
-    return max(1, attempts)  # At least 1 attempt
+    return attempts
 
 
 def check_safety_abort(metadata: Dict[str, Any]) -> bool:
@@ -159,7 +166,7 @@ def check_safety_abort(metadata: Dict[str, Any]) -> bool:
     return False
 
 
-def calculate_episode_metrics(progress_stages: Dict[str, List[List[float]]], 
+def calculate_episode_metrics(progress_stage_labels: Dict[str, List[List[float]]], 
                             task_spec: Dict[str, Any]) -> Dict[str, Any]:
     """Calculate episode metrics from progress stages and task spec."""
     score_definition = task_spec["score_definition"]["task_progress_score"]
@@ -169,7 +176,7 @@ def calculate_episode_metrics(progress_stages: Dict[str, List[List[float]]],
     latest_stage = None
     latest_time = -1
     
-    for stage, intervals in progress_stages.items():
+    for stage, intervals in progress_stage_labels.items():
         if stage in stage_order:
             for interval in intervals:
                 end_time = interval[1]
@@ -198,8 +205,8 @@ def calculate_episode_metrics(progress_stages: Dict[str, List[List[float]]],
     }
 
 
-def process_episode(episode_dir: Path, eval_config: Dict[str, Any], 
-                   task_spec: Dict[str, Any], force_override: bool = False) -> None:
+def process_episode(episode_idx: int, episode_count: int, episode_dir: Path, eval_config: Dict[str, Any], 
+                   task_spec: Dict[str, Any], force_override: bool = False) -> Optional[Dict[str, Any]]:
     """Process a single episode for scoring."""
     episode_id = episode_dir.name
     eval_score_path = episode_dir / "eval_score.yaml"
@@ -210,15 +217,18 @@ def process_episode(episode_dir: Path, eval_config: Dict[str, Any],
         existing_config = existing_score.get("eval_config", {})
         
         eval_config_diff = DeepDiff(existing_config, eval_config, significant_digits=1e-3)
-        if eval_config_diff:
-            logging.info(f"Episode {episode_id}: eval_score.yaml already exists with matching config. Skipping.")
-            return
+        logging.info(f"Episode {episode_id}: Found existing eval_score.yaml for this episode:")
+        logging.info(yaml.dump(existing_score, default_flow_style=False, indent=2))
+        if len(eval_config_diff) == 0:
+            logging.info(f"Eval config matches.")
         else:
-            logging.info(f"Episode {episode_id}: eval_score.yaml exists but config differs: {eval_config_diff}.")
-            response = input("Override existing file? (y/N): ")
-            if response.lower() != 'y':
-                logging.info("Skipping episode.")
-                return
+            logging.info(f"Eval config differs: {eval_config_diff}.")
+        
+        response = input("Override existing file? (y/N): ")
+        if response.lower() != 'y':
+            logging.info("Skipping episode.")
+            # Return existing score for dataset metrics calculation
+            return existing_score
     
     # Load episode metadata and sync logs
     metadata_path = episode_dir / "metadata.json"
@@ -242,24 +252,21 @@ def process_episode(episode_dir: Path, eval_config: Dict[str, Any],
     logging.info(f"Videos: {[p.name for p in video_paths]}")
     logging.info(f"Duration: {metadata.get('duration_s', 0):.2f}s")
     
-    # Launch video player for manual labeling
+    # Launch labeler for manual labeling
     fps = metadata.get("fps", 30.0)
     progress_stage_labels = sorted(list(task_spec["score_definition"]["task_progress_score"].keys()))
     horizon_s = eval_config.get("horizon_s")
-    player = TaskProgressLabeler(video_paths, progress_stage_labels, fps, horizon_s)
-    progress_stages = player.play()
-    
-    if not progress_stages:
-        print("No progress stages labeled. Skipping episode.")
-        return
+    labeler_title = f"{episode_idx}/{episode_count}: {episode_id}"
+    labeler = TaskProgressLabeler(video_paths, progress_stage_labels, fps, horizon_s, labeler_title)
+    progress_stage_labels = labeler.play()
     
     # Calculate metrics
-    episode_metrics = calculate_episode_metrics(progress_stages, task_spec)
+    episode_metrics = calculate_episode_metrics(progress_stage_labels, task_spec)
     
     # Calculate additional metrics
     frame_latency_ms = calculate_frame_latency_ms(sync_logs)
     is_safety_abort = check_safety_abort(metadata)
-    num_attempts = calculate_num_attempts(progress_stages)
+    num_attempts = calculate_num_attempts(progress_stage_labels, task_spec)
     
     # Create eval score data
     eval_score_data = {
@@ -267,7 +274,7 @@ def process_episode(episode_dir: Path, eval_config: Dict[str, Any],
         "eval_config": eval_config,
         "episode_metrics": {
             **episode_metrics,
-            "progress_stage_timerange_s": progress_stages,
+            "progress_stage_timerange_s": progress_stage_labels,
             "frame_latency_ms": round(frame_latency_ms, 1),
             "is_safety_abort": is_safety_abort,
             "num_attempts": num_attempts
@@ -286,6 +293,98 @@ def process_episode(episode_dir: Path, eval_config: Dict[str, Any],
     logging.info(f"  Frame latency: {frame_latency_ms:.1f}ms")
     logging.info(f"  Safety abort: {'Yes' if is_safety_abort else 'No'}")
     logging.info(f"  Attempts: {num_attempts}")
+    
+    # Return the eval score data for dataset metrics calculation
+    return eval_score_data
+
+
+def calculate_average_progress_stage_duration(all_episode_scores: List[Dict[str, Any]], 
+                                            task_spec: Dict[str, Any]) -> Dict[str, float]:
+    """Calculate average duration for each progress stage across all episodes."""
+    stage_durations = defaultdict(list)
+    
+    for episode_score in all_episode_scores:
+        progress_stages = episode_score["episode_metrics"]["progress_stage_timerange_s"]
+        
+        for stage, intervals in progress_stages.items():
+            for interval in intervals:
+                duration = interval[1] - interval[0]
+                stage_durations[stage].append(duration)
+    
+    # Calculate averages
+    avg_durations = {}
+    score_definition = task_spec["score_definition"]["task_progress_score"]
+    stage_order = sorted(list(score_definition.keys()))
+    
+    for stage in stage_order:
+        if stage in stage_durations and stage_durations[stage]:
+            avg_durations[stage] = sum(stage_durations[stage]) / len(stage_durations[stage])
+        else:
+            avg_durations[stage] = 0.0
+    
+    return avg_durations
+
+
+def calculate_dataset_metrics(all_episode_scores: List[Dict[str, Any]], 
+                            eval_config: Dict[str, Any],
+                            task_spec: Dict[str, Any],
+                            episodes: List[Path],
+                            eval_set_name: str) -> Dict[str, Any]:
+    """Calculate dataset-level metrics from all episode scores."""
+    if not all_episode_scores:
+        raise ValueError("No episode scores available for dataset metrics calculation")
+    
+    # Extract metrics from all episodes
+    task_progress_scores = []
+    successes = []
+    safety_aborts = []
+    durations_to_success = []
+    num_attempts = []
+    frame_latencies = []
+    
+    for episode_score in all_episode_scores:
+        metrics = episode_score["episode_metrics"]
+        
+        task_progress_scores.append(metrics["task_progress_score"])
+        successes.append(metrics["success"])
+        safety_aborts.append(metrics["is_safety_abort"])
+        num_attempts.append(metrics["num_attempts"])
+        frame_latencies.append(metrics["frame_latency_ms"])
+        
+        # Only include successful episodes for duration calculation
+        if metrics["duration_to_success_s"] > 0:
+            durations_to_success.append(metrics["duration_to_success_s"])
+    
+    # Calculate averages
+    avg_task_progress_score = sum(task_progress_scores) / len(task_progress_scores)
+    success_rate = sum(successes) / len(successes)
+    safety_abort_rate = sum(safety_aborts) / len(safety_aborts)
+    avg_duration_to_success = sum(durations_to_success) / len(durations_to_success) if durations_to_success else -1.0
+    avg_num_attempts = sum(num_attempts) / len(num_attempts)
+    avg_frame_latency = sum(frame_latencies) / len(frame_latencies)
+    
+    # Calculate average progress stage durations
+    avg_stage_durations = calculate_average_progress_stage_duration(all_episode_scores, task_spec)
+    
+    # Create dataset metrics
+    dataset_metrics = {
+        "eval_config": eval_config,
+        "eval_set_metrics": {
+            "average_task_progress_score": round(avg_task_progress_score, 3),
+            "success_rate": round(success_rate, 3),
+            "safety_abort_rate": round(safety_abort_rate, 3),
+            "average_duration_to_success_s": round(avg_duration_to_success, 1) if avg_duration_to_success > 0 else -1.0,
+            "average_num_attempts": round(avg_num_attempts, 1),
+            "average_frame_latency_ms": round(avg_frame_latency, 1),
+            "average_progress_stage_duration_s": {k: round(v, 1) for k, v in avg_stage_durations.items()}
+        },
+        "eval_set": {
+            "dataset_id": eval_set_name,
+            "episodes_list": [ep.name for ep in episodes]
+        }
+    }
+    
+    return dataset_metrics
 
 
 def main():
@@ -337,8 +436,20 @@ def main():
     # Verify episode durations
     verify_episode_durations(dataset_dir, episodes, eval_horizon_s)
     
-    # Process each episode
+    # Check for existing dataset eval score
+    dataset_eval_score_path = dataset_dir / "dataset_eval_score.yaml"
+    if dataset_eval_score_path.exists():
+        print(f"\nFound existing dataset_eval_score.yaml:")
+        existing_dataset_score = load_yaml(dataset_eval_score_path)
+        print(yaml.dump(existing_dataset_score, default_flow_style=False, indent=2))
+        response = input("Override existing dataset eval score? (y/N): ")
+        if response.lower() != 'y':
+            print("Keeping existing dataset eval score. Exiting.")
+            return
+    
+    # Process each episode and collect scores
     logging.info(f"\nProcessing {len(episodes)} episodes...")
+    all_episode_scores = []
     
     for i, episode_id in enumerate(episodes, 1):
         episode_dir = dataset_dir / "episodes" / episode_id
@@ -347,7 +458,9 @@ def main():
         print(f"{'='*60}")
         
         try:
-            process_episode(episode_dir, eval_config, task_spec, args.force)
+            episode_score = process_episode(i, len(episodes), episode_dir, eval_config, task_spec, args.force)
+            if episode_score is not None:
+                all_episode_scores.append(episode_score)
         except KeyboardInterrupt:
             print("\nInterrupted by user. Exiting.")
             sys.exit(1)
@@ -356,7 +469,49 @@ def main():
             traceback.print_exc()
             response = input("Continue with next episode? (Y/n): ")
             if response.lower() == 'n':
-                sys.exit(1)
+                break
+        
+        # Check if user wants to continue with next episode
+        # as an opportunity to early exit.
+        response = input("Continue with next episode? (Y/n): ")
+        if response.lower() == 'n':
+            break
+    
+    # Calculate and save dataset eval metrics
+    if all_episode_scores:
+        print(f"\n{'='*60}")
+        print("Calculating dataset metrics...")
+        print(f"{'='*60}")
+        
+        try:
+            dataset_metrics = calculate_dataset_metrics(all_episode_scores, eval_config, task_spec, episodes, args.eval_set_name)
+            
+            # Save dataset eval score as YAML and JSON
+            save_yaml(dataset_metrics, dataset_eval_score_path)
+            
+            # Also save as JSON
+            dataset_eval_score_json_path = dataset_dir / "dataset_eval_score.json"
+            with open(dataset_eval_score_json_path, 'w') as f:
+                json.dump(dataset_metrics, f, indent=2)
+            
+            logging.info(f"Saved dataset eval score to: {dataset_eval_score_path}")
+            logging.info(f"Saved dataset eval score (JSON) to: {dataset_eval_score_json_path}")
+            
+            # Display dataset metrics summary
+            print(f"\nDataset Metrics Summary:")
+            print(f"  Episodes processed: {len(all_episode_scores)}")
+            print(f"  Average task progress score: {dataset_metrics['eval_set_metrics']['average_task_progress_score']}")
+            print(f"  Success rate: {dataset_metrics['eval_set_metrics']['success_rate']:.1%}")
+            print(f"  Safety abort rate: {dataset_metrics['eval_set_metrics']['safety_abort_rate']:.1%}")
+            print(f"  Average duration to success: {dataset_metrics['eval_set_metrics']['average_duration_to_success_s']:.1f}s")
+            print(f"  Average attempts: {dataset_metrics['eval_set_metrics']['average_num_attempts']:.1f}")
+            print(f"  Average frame latency: {dataset_metrics['eval_set_metrics']['average_frame_latency_ms']:.1f}ms")
+            
+        except Exception as e:
+            print(f"Error calculating dataset metrics: {e}")
+            traceback.print_exc()
+    else:
+        print("No episode scores available for dataset metrics calculation.")
     
     print(f"\n{'='*60}")
     print("All episodes processed successfully!")

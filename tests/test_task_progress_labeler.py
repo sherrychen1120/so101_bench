@@ -9,7 +9,7 @@ def test_task_progress_labeler():
     progress_stage_labels = ["stage_1", "stage_2", "stage_3"]
     fps = 30.0
     horizon_s = 10.0
-    player = TaskProgressLabeler(video_paths, progress_stage_labels, fps, horizon_s)
+    player = TaskProgressLabeler(video_paths, progress_stage_labels, fps, horizon_s, "test episode")
     progress_stages = player.play()
 
     print(progress_stages)
