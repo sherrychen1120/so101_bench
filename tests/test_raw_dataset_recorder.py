@@ -95,7 +95,7 @@ def test_raw_recorder():
             recorder.add_frame(
                 observation=observation,
                 action=action,
-                timestamp=timestamp,
+                frame_timestamp=timestamp,
                 sequence_number=frame_idx + 1
             )
         

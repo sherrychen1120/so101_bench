@@ -1,0 +1,11 @@
+task_name: "pick_and_place_block"
+variations:
+  # All blocks align longer edge with y axis at yaw = 0.
+  block: "white"
+  container: "tupperware"
+  start_pose: 
+    block: [0.0, 0.0, 0.0]
+    container: [0.0, 0.0, 0.0]
+
+is_eval: false
+source_episode_dir: ""

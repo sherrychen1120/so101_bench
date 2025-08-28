@@ -1,0 +1,39 @@
+{
+    "cam_front": {
+        "type": "opencv",
+        "index_or_path": "/dev/cam_front",
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "auto_exposure": 1.0,
+        "exposure": 100.0, 
+        "gain": 5.0,
+        "auto_white_balance": 0.0, 
+        "white_balance_temperature": 4650.0, 
+        "autofocus": 0.0, 
+        "brightness": 128.0, 
+        "contrast": 128.0, 
+        "saturation": 128.0, 
+        "sharpness": 128.0, 
+        "zoom_absolute": 10.0
+    },
+    "cam_top": {
+        "type": "opencv",
+        "index_or_path": "/dev/cam_top",
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "auto_exposure": 1.0,
+        "exposure": 100.0, 
+        "gain": 5.0,
+        "auto_white_balance": 0.0, 
+        "white_balance_temperature": 4650.0, 
+        "autofocus": 0.0, 
+        "brightness": 128.0, 
+        "contrast": 128.0, 
+        "saturation": 128.0, 
+        "sharpness": 128.0, 
+        "zoom_absolute": 10.0
+    }
+}
+  

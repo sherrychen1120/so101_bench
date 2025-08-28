@@ -1,28 +1,65 @@
 #!/usr/bin/env python
-
-# Copyright 2024 The HuggingFace Inc. team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 """
 Raw dataset recorder for LeRobot that saves data in a human-readable format
 for easy debugging, visualization, and training other models.
+
+See docs/raw_dataset_format.md for the output format.
+
+The raw dataset recorder is used programmatically through the `RawDatasetRecorder` class:
+
+Programmatic usage example:
+    ```python
+    from so101_bench.raw_dataset_recorder import RawDatasetRecorder
+
+    # Initialize recorder
+    recorder = RawDatasetRecorder(
+        dataset_name="my_dataset",
+        root_dir="/path/to/datasets",
+        robot_config=robot_config,
+        robot_calibration_fpath=Path("robot_calib.json"),
+        teleop_config=teleop_config,
+        teleop_calibration_fpath=Path("teleop_calib.json"),
+        fps=30,
+        save_videos=True,
+        image_writer_processes=4,
+        image_writer_threads=4
+    )
+
+    # Start episode
+    episode_id = recorder.start_episode(
+        episode_idx=1,
+        run_mode="teleop",
+        leader_id="leader_arm",
+        follower_id="follower_arm"
+    )
+
+    # Add frames during recording
+    recorder.add_frame(
+        observation=observation_dict,
+        action=action_dict,
+        frame_timestamp=timestamp,
+        sequence_number=frame_idx
+    )
+
+    # Add events (optional)
+    recorder.add_event(
+        frame_timestamp=timestamp,
+        events={"emergency_stop": False}
+    )
+
+    # Save episode
+    metadata = recorder.save_episode(task_description="Pick red cube")
+
+    # Clean up
+    recorder.cleanup()
+    ```
 """
 
 import json
 import logging
 import os
 import time
+from deepdiff import DeepDiff
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -33,23 +70,32 @@ import numpy as np
 import yaml
 from PIL import Image
 
-from so101_bench.image_writer import AsyncImageWriter
+from lerobot.datasets.image_writer import AsyncImageWriter
 
+EMERGENCY_STOP_EVENT = "WARNING_EMERGENCY_STOP_PRESSED"
 
 class RawDatasetRecorder:
     """Records robot data in a raw, human-readable format alongside LeRobot format."""
     METADATA_FILENAME = "metadata.json"
-    SPLITS_FILENAME = "splits.yaml"
     MANIFEST_FILENAME = "manifest.jsonl"
+    TASK_CONFIG_FILENAME = "task_config.yaml"
+
+    EVENTS_TO_RECORD = {
+        "emergency_stop": EMERGENCY_STOP_EVENT,
+    }
     
     def __init__(
         self,
         dataset_name: str,
         root_dir: str | Path,
+        is_resume: bool,
+        # TODO(sherry): Just pass in RobotConfig and TeleoperatorConfig
+        # instead of dictionaries.
         robot_config: Dict[str, Any],
         robot_calibration_fpath: Path,
         teleop_config: Dict[str, Any],
         teleop_calibration_fpath: Path,
+        dataset_task_config: Dict[str, Any] | None,
         fps: int = 30,
         save_videos: bool = True,
         image_writer_processes: int = 0,
@@ -78,47 +124,34 @@ class RawDatasetRecorder:
         self.save_videos = save_videos
         
         # Create dataset directory structure
-        self.dataset_dir = self.root_dir / "datasets" / dataset_name
-        self.dataset_dir.mkdir(parents=True, exist_ok=True)
+        self.dataset_dir = self.root_dir / dataset_name
+        self.dataset_dir.mkdir(parents=True, exist_ok=is_resume)
         
         # Create subdirectories
         self.episodes_dir = self.dataset_dir / "episodes"
-        self.episodes_dir.mkdir(exist_ok=True)
+        self.episodes_dir.mkdir(exist_ok=is_resume)
         
         self.arm_calib_dir = self.dataset_dir / "arm_calib"
-        self.arm_calib_dir.mkdir(exist_ok=True)
+        self.arm_calib_dir.mkdir(exist_ok=is_resume)
 
         # Save leader and follower arm calibration
         self._save_arm_calibration(robot_calibration_fpath, robot_config)
         self._save_arm_calibration(teleop_calibration_fpath, teleop_config)
-        
-        # Initialize splits file if it doesn't exist
-        self.splits_file = self.dataset_dir / self.SPLITS_FILENAME
-        if not self.splits_file.exists():
-            splits = {"train": [], "val_id": [], "val_ood": []}
-            with open(self.splits_file, "w") as f:
-                yaml.dump(splits, f, default_flow_style=False)
+
+        # Save camera configs
+        self._save_camera_configs(robot_config)
+
+        # Save task config at the dataset level.
+        if dataset_task_config is not None:
+            self.dataset_task_config = dataset_task_config
+            task_config_file = self.dataset_dir / self.TASK_CONFIG_FILENAME
+            with open(task_config_file, "w") as f:
+                yaml.dump(dataset_task_config, f, default_flow_style=False, sort_keys=False)
         
         # Initialize manifest file
         self.manifest_file = self.dataset_dir / self.MANIFEST_FILENAME
         
-        # Current episode data
-        self.current_episode = None
-        self.current_episode_dir = None
-        self.episode_start_time = None
-        self.frame_count = 0
-        
-        # Camera frame buffers for video creation
-        self.camera_frame_buffers = {}
-        self.camera_timestamps = {}
-        
-        # Trajectory buffers
-        self.leader_trajectory = []
-        self.follower_trajectory = []
-        
-        # Sync and metrics logs
-        self.sync_logs = []
-        self.recorder_metrics = []
+        self.reset_episode_data()
         
         # Image writer for async image saving
         self.image_writer = None
@@ -130,6 +163,29 @@ class RawDatasetRecorder:
         
         logging.info(f"Raw dataset recorder initialized at {self.dataset_dir}")
     
+    def reset_episode_data(self):
+        # Current episode data
+        self.current_episode = None
+        self.current_episode_dir = None
+        self.episode_start_time = None
+        self.frame_count = 0
+        self.task_config = None
+        
+        # Camera frame buffers for video creation
+        self.camera_frame_buffers = {}
+        self.camera_timestamps = {}
+        
+        # Trajectory buffers
+        self.leader_trajectory = []
+        self.follower_trajectory = []
+
+        # Events. List of tuples of (event_timestamp, event_name)
+        self.events = []
+        
+        # Sync and metrics logs
+        self.sync_logs = []
+        self.recorder_metrics = []
+
     def _save_arm_calibration(self, calibration_fpath: Path, arm_config: dict):
         incoming_calib = json.load(open(calibration_fpath))
         calibration_write_path = self.arm_calib_dir / f"{arm_config['id']}.json"
@@ -139,11 +195,32 @@ class RawDatasetRecorder:
             # Direct comparison is possible because all numeric values are ints.
             if existing_calib != incoming_calib:
                 raise ValueError(f"Cannot record to same dataset_dir: "
-                f"{self.dataset_dir} with different calibration for "
-                f"{arm_config['id']}: {existing_calib} != {incoming_calib}")
+                    f"{self.dataset_dir} with different calibration for "
+                    f"{arm_config['id']}: {existing_calib} != {incoming_calib}"
+                )
         else:
             with open(calibration_write_path, "w") as f:
                 json.dump(incoming_calib, f, indent=2)
+    
+    def _save_camera_configs(self, robot_config: dict):
+        configs_write_path = self.dataset_dir / "camera_configs.json"
+        
+        if os.path.exists(configs_write_path):
+            existing_configs = json.load(open(configs_write_path))
+            # Go through a json conversion to convert everything to primitive types
+            # in order to compare them.
+            incoming_configs = json.loads(json.dumps(robot_config["cameras"], indent=2))
+            # Approximate comparison of camera configs.
+            diff = DeepDiff(existing_configs, incoming_configs, significant_digits=3)
+
+            if diff:
+                raise ValueError(f"Cannot record to same dataset_dir: "
+                    f"{self.dataset_dir} with different camera configs: "
+                    f"{diff}"
+                )
+        else:
+            with open(configs_write_path, "w") as f:
+                json.dump(robot_config["cameras"], f, indent=2)
 
     def start_episode(
         self,
@@ -152,6 +229,7 @@ class RawDatasetRecorder:
         policy_info: Optional[Dict[str, Any]] = None,
         leader_id: Optional[str] = None,
         follower_id: Optional[str] = None,
+        task_config: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Start recording a new episode.
@@ -162,14 +240,28 @@ class RawDatasetRecorder:
             policy_info: Policy information if run_mode is "policy"
             leader_id: Leader arm ID
             follower_id: Follower arm ID
+            task_config: Task configuration dictionary to save with episode
             
         Returns:
             Episode ID string
         """
         # Generate episode ID with timestamp
-        timestamp = datetime.now(timezone.utc)
+        timestamp = datetime.now()
         episode_id = f"{episode_idx:03d}" + "_" + timestamp.strftime("%Y-%m-%d_%H-%M-%S")
+        # Save task configuration if provided
         
+        if (
+            task_config is not None
+            and "is_eval" in task_config
+            and task_config["is_eval"]
+        ):
+            source_episode_dir = task_config["source_episode_dir"]
+            source_dataset_name = source_episode_dir.split("/")[0]
+            source_episode_id = source_episode_dir.split("/")[-1]
+            episode_id = f"{source_dataset_name}__{source_episode_id}__eval__" + episode_id
+        
+        assert self.current_episode is None, f"Episode already started: {self.current_episode}"
+
         self.current_episode = episode_id
         self.current_episode_dir = self.episodes_dir / episode_id
         self.current_episode_dir.mkdir(exist_ok=True)
@@ -197,24 +289,41 @@ class RawDatasetRecorder:
         with open(metadata_file, "w") as f:
             json.dump(episode_metadata, f, indent=2)
         
-        # Reset episode data
-        self.episode_start_time = time.time()
-        self.frame_count = 0
-        self.camera_frame_buffers = {}
-        self.camera_timestamps = {}
-        self.leader_trajectory = []
-        self.follower_trajectory = []
-        self.sync_logs = []
-        self.recorder_metrics = []
+        if task_config is not None:
+            assert task_config["task_name"] == self.dataset_task_config["task_name"], \
+                f"Task name mismatch. Episode: {task_config['task_name']}; "\
+                f"Dataset: {self.dataset_task_config['task_name']}"
+            self.task_config = task_config
+            task_config_file = self.current_episode_dir / self.TASK_CONFIG_FILENAME
+            with open(task_config_file, "w") as f:
+                yaml.dump(task_config, f, default_flow_style=False, sort_keys=False)
+            logging.info(f"Saved task configuration for episode: {episode_id}")
         
         logging.info(f"Started recording episode: {episode_id}")
         return episode_id
     
+    def add_event(
+        self,
+        frame_timestamp: float,
+        events: Dict[str, bool],
+    ):
+        """
+        Add an event to the current episode.
+    
+        Args:
+            frame_timestamp: Frame timestamp
+            events: Events from the control loop. 
+                Keyed by event name. True if the event is triggered.
+        """
+        for event_name, triggered in events.items():
+            if event_name in self.EVENTS_TO_RECORD and triggered:
+                self.events.append((frame_timestamp, self.EVENTS_TO_RECORD[event_name]))
+
     def add_frame(
         self,
         observation: Dict[str, Any],
         action: Dict[str, Any],
-        timestamp: float,
+        frame_timestamp: float,
         sequence_number: int,
     ):
         """
@@ -223,7 +332,7 @@ class RawDatasetRecorder:
         Args:
             observation: Robot observation data including camera images
             action: Robot action data
-            timestamp: Frame timestamp
+            frame_timestamp: Frame timestamp
             sequence_number: Frame sequence number
         """
         if self.current_episode is None:
@@ -231,57 +340,64 @@ class RawDatasetRecorder:
         
         # Process camera observations
         for cam_name, cam_data in observation.items():
-            if "cam" in cam_name:
-                # Extract camera name (e.g., "observation.images.cam_front" -> "cam_front")
-                camera_key = cam_name.split(".")[-1]
+            if "cam" not in cam_name:
+                continue
+
+            if cam_name.endswith("_timestamp"):
+                camera_key = cam_name.split("_timestamp")[0]
+                if camera_key not in self.camera_timestamps:
+                    self.camera_timestamps[camera_key] = []
+
+                self.camera_timestamps[camera_key].append(cam_data)
+                continue
+
+            camera_key = cam_name
+
+            # Create camera directory
+            cam_dir = self.current_episode_dir / "obs" / camera_key
+            cam_dir.mkdir(exist_ok=True)
+            
+            # Save image
+            if not isinstance(cam_data, np.ndarray):
+                logging.warning(f"Camera {cam_name} data is not a numpy array: {cam_data}")
+                # Skipping this frame
+                return
+            
+            # Convert numpy array to PIL Image
+            if cam_data.dtype == np.uint8 and len(cam_data.shape) == 3:
+                # RGB image
+                image = Image.fromarray(cam_data)
+            else:
+                # Convert to uint8 if needed
+                if cam_data.max() <= 1.0:
+                    cam_data = (cam_data * 255).astype(np.uint8)
+                image = Image.fromarray(cam_data.astype(np.uint8))
+            
+            # Save image
+            image_path = cam_dir / f"{sequence_number:06d}.jpg"
+            if self.image_writer:
+                self.image_writer.save_image(image=image, fpath=image_path)
+            else:
+                image.save(image_path, "JPEG", quality=95)
+            
+            # Store for video creation
+            if self.save_videos:
+                if camera_key not in self.camera_frame_buffers:
+                    self.camera_frame_buffers[camera_key] = []
                 
-                # Create camera directory
-                cam_dir = self.current_episode_dir / "obs" / camera_key
-                cam_dir.mkdir(exist_ok=True)
+                # Convert PIL image back to numpy for video
+                frame_array = np.array(image)
+                if len(frame_array.shape) == 3:
+                    # Convert RGB to BGR for OpenCV
+                    frame_array = cv2.cvtColor(frame_array, cv2.COLOR_RGB2BGR)
                 
-                # Save image
-                if not isinstance(cam_data, np.ndarray):
-                    logging.warning(f"Camera {cam_name} data is not a numpy array: {cam_data}")
-                    # Skipping this frame
-                    return
-                
-                # Convert numpy array to PIL Image
-                if cam_data.dtype == np.uint8 and len(cam_data.shape) == 3:
-                    # RGB image
-                    image = Image.fromarray(cam_data)
-                else:
-                    # Convert to uint8 if needed
-                    if cam_data.max() <= 1.0:
-                        cam_data = (cam_data * 255).astype(np.uint8)
-                    image = Image.fromarray(cam_data.astype(np.uint8))
-                
-                # Save image
-                image_path = cam_dir / f"{sequence_number:06d}.jpg"
-                if self.image_writer:
-                    self.image_writer.save_image(image=image, fpath=image_path)
-                else:
-                    image.save(image_path, "JPEG", quality=95)
-                
-                # Store for video creation
-                if self.save_videos:
-                    if camera_key not in self.camera_frame_buffers:
-                        self.camera_frame_buffers[camera_key] = []
-                        self.camera_timestamps[camera_key] = []
-                    
-                    # Convert PIL image back to numpy for video
-                    frame_array = np.array(image)
-                    if len(frame_array.shape) == 3:
-                        # Convert RGB to BGR for OpenCV
-                        frame_array = cv2.cvtColor(frame_array, cv2.COLOR_RGB2BGR)
-                    
-                    self.camera_frame_buffers[camera_key].append(frame_array)
-                    self.camera_timestamps[camera_key].append(timestamp)
+                self.camera_frame_buffers[camera_key].append(frame_array)
         
         # Save camera timestamps
-        for cam_name in self.camera_timestamps:
+        for cam_name, cam_timestamp in self.camera_timestamps.items():
             timestamp_file = self.current_episode_dir / "obs" / cam_name / "timestamps.jsonl"
             with jsonlines.open(timestamp_file, "a") as writer:
-                writer.write({"timestamp": timestamp, "sequence_number": sequence_number})
+                writer.write({"sequence_number": sequence_number, "timestamp": cam_timestamp})
         
         # Process arm trajectories
         leader_joints = {}
@@ -298,16 +414,16 @@ class RawDatasetRecorder:
         # Add trajectory points
         if leader_joints:
             leader_point = {
-                "timestamp": timestamp,
                 "sequence_number": sequence_number,
+                "timestamp": action["action_timestamp"],
                 **leader_joints
             }
             self.leader_trajectory.append(leader_point)
         
         if follower_joints:
             follower_point = {
-                "timestamp": timestamp,
                 "sequence_number": sequence_number,
+                "timestamp": observation["robot_state_timestamp"],
                 **follower_joints
             }
             self.follower_trajectory.append(follower_point)
@@ -315,11 +431,11 @@ class RawDatasetRecorder:
         # Add sync log entry
         sync_entry = {
             "sequence_number": sequence_number,
-            "timestamp": timestamp,
+            "timestamp": frame_timestamp,
+            "robot_state_timestamp": observation["robot_state_timestamp"],
             "camera_timestamps": {cam: self.camera_timestamps[cam][-1] 
                                 for cam in self.camera_timestamps},
-            "leader_timestamp": timestamp if leader_joints else None,
-            "follower_timestamp": timestamp if follower_joints else None,
+            "action_timestamp": action["action_timestamp"],
         }
         self.sync_logs.append(sync_entry)
         self.frame_count += 1
@@ -387,6 +503,7 @@ class RawDatasetRecorder:
             "actual_fps": actual_fps,
             "task_description": task_description,
             "cameras": list(self.camera_frame_buffers.keys()),
+            "events": self.events,
         })
         
         with open(meta_file, "w") as f:
@@ -404,17 +521,20 @@ class RawDatasetRecorder:
             "start_time": episode_metadata["start_time"],
             "end_time": episode_metadata["end_time"],
         }
+        if(
+            self.task_config 
+            and "is_eval" in self.task_config 
+            and self.task_config["is_eval"]
+        ):
+            manifest_entry["is_eval"] = True
+            manifest_entry["source_episode_dir"] = self.task_config["source_episode_dir"]
         
         with jsonlines.open(self.manifest_file, "a") as writer:
             writer.write(manifest_entry)
         
         logging.info(f"Saved episode {episode_id} with {self.frame_count} frames")
         
-        # Reset current episode
-        self.current_episode = None
-        self.current_episode_dir = None
-        self.episode_start_time = None
-        self.frame_count = 0
+        self.reset_episode_data()
         
         return episode_metadata
     
@@ -488,13 +608,6 @@ class RawDatasetRecorder:
                 logging.error(f"Error creating video {video_path}: {e}")
             finally:
                 video_writer.release()
-    
-    def update_splits(self, splits: Dict[str, List[str]]):
-        """Update the SPLITS_FILENAME file with episode assignments."""
-        with open(self.splits_file, "w") as f:
-            yaml.dump(splits, f, default_flow_style=False)
-        
-        logging.info("Updated dataset splits")
     
     def cleanup(self):
         """Clean up resources."""
