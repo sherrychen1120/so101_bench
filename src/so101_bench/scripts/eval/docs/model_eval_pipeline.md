@@ -73,6 +73,7 @@ on source dataset structure.
 ```
 source_dataset/
   splits.yaml                    # Dataset splits
+  task_config.yaml              # Dataset-level task configuration.
   arm_calib/
     {leader_id}.json            # Arm calibrations
     {follower_id}.json
@@ -81,16 +82,6 @@ source_dataset/
       metadata.json             # Episode metadata
       task_config.yaml          # Task configuration
       # ... other episode files
-```
-
-#### task_config.yaml Format
-```yaml
-task_description: "Pick and place red cube"
-object_positions:
-  red_cube: [0.1, 0.2, 0.05]
-  container: [0.3, 0.1, 0.0]
-initial_arm_position: [0.0, 0.0, 0.0, 0.0]
-# ... other task-specific configurations
 ```
 
 #### splits.yaml Format
@@ -189,32 +180,6 @@ python -m so101_bench.scripts.eval.eval_scorer \
 horizon_s: 30  # Evaluation horizon in seconds
 ```
 
-#### Task Specification (`task_spec.yaml`)
-```yaml
-# A `task_spec` defines the available variations of a task.
-# It also defines the score to evaluate the performance of the task.
-task_name: "pick_and_place_block"
-variations:
-  block: ["white", "green", "grey", "eraser"]
-  container: ["tupperware", "bowl", "box"]
-  start_pose: # [x, y, yaw(deg)]
-    # All blocks align longer edge with y axis at yaw = 0.
-    block:
-      min: [0.0, 0.0, -90.0]
-      max: [0.4, 0.32, 90.0]
-    container:
-      min: [0.0, 0.0, -90.0]
-      max: [0.4, 0.32, 90.0]
-
-score_definition:
-  task_progress_score:
-    0_reach_block: 0.2
-    1_grasp_block: 0.4
-    2_reach_container: 0.6
-    3_release_block: 0.8
-    4_block_in_container: 1.0
-```
-
 #### Dataset Structure
 ```
 eval_dataset/
@@ -229,6 +194,8 @@ eval_dataset/
 ```
 
 ### Interactive Labeling
+
+The image above shows what the video player looks like. 
 
 The scorer launches an interactive video player with:
 
