@@ -16,6 +16,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+Config classes used by `record.py`. Based on the original `lerobot/record.py`.
+"""
+
 from dataclasses import dataclass
 from pathlib import Path
 

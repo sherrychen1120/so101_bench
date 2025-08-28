@@ -93,7 +93,7 @@ from lerobot.utils.utils import (
 from lerobot.utils.visualization_utils import _init_rerun, log_rerun_data
 
 from so101_bench.file_utils import load_yaml, save_yaml
-from so101_bench.record_configs import RecordConfig
+from so101_bench.recorder_configs import RecordConfig
 from so101_bench.raw_dataset_recorder import RawDatasetRecorder
 from so101_bench.scripts.record import record_loop
 

@@ -101,7 +101,7 @@ from lerobot.utils.visualization_utils import _init_rerun, log_rerun_data
 
 from so101_bench.raw_dataset_recorder import RawDatasetRecorder
 from so101_bench.task_configurator import TaskConfigurator
-from so101_bench.record_configs import RecordConfig
+from so101_bench.recorder_configs import RecordConfig
 
 @safe_stop_image_writer
 def record_loop(
