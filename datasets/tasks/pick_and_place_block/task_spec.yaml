@@ -1,5 +1,5 @@
 # A `task_spec` defines the available variations of a task.
-# It also defines the metrics to evaluate the performance of the task.
+# It also defines the score to evaluate the performance of the task.
 task_name: "pick_and_place_block"
 variations:
   block: ["white", "green", "grey", "eraser"]
@@ -13,8 +13,8 @@ variations:
       min: [0.0, 0.0, -90.0]
       max: [0.4, 0.32, 90.0]
   
-metrics_definition:
-  task_progress_to_score:
+score_definition:
+  task_progress_score:
     0_reach_block: 0.2
     1_grasp_block: 0.4
     2_reach_container: 0.7

@@ -27,6 +27,9 @@ class TaskConfigurator:
         
         self.last_task_config = deepcopy(self.task_config_template)
     
+    def generate_task_config_for_dataset(self):
+        return {"task_name": self.task_name}
+    
     def get_task_config_from_user(self) -> dict:
         """
         Get task configuration from user input by opening an editor.

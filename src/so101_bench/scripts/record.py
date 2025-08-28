@@ -274,6 +274,13 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
         raw_root = cfg.dataset.raw_format_root
         # Extract dataset name from repo_id (e.g., "user/dataset" -> "dataset")
         dataset_name = cfg.dataset.repo_id.split("/")[-1]
+        dataset_task_config = None
+        if cfg.dataset.tasks_dir is not None and cfg.dataset.task_name is not None:
+            task_configurator = TaskConfigurator(
+                tasks_dir=Path(cfg.dataset.tasks_dir),
+                task_name=cfg.dataset.task_name,
+            )
+            dataset_task_config = task_configurator.generate_task_config_for_dataset()
         raw_recorder = RawDatasetRecorder(
             dataset_name=dataset_name,
             root_dir=raw_root,
@@ -282,17 +289,13 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
             robot_calibration_fpath=robot.calibration_fpath,
             teleop_config=asdict(cfg.teleop),
             teleop_calibration_fpath=teleop.calibration_fpath,
+            dataset_task_config=dataset_task_config,
             fps=cfg.dataset.fps,
             save_videos=cfg.dataset.raw_format_videos,
             image_writer_processes=cfg.dataset.num_image_writer_processes,
             image_writer_threads=cfg.dataset.num_image_writer_threads_per_camera,
         )
-        if cfg.dataset.tasks_dir is not None and cfg.dataset.task_name is not None:
-            task_configurator = TaskConfigurator(
-                tasks_dir=Path(cfg.dataset.tasks_dir),
-                task_name=cfg.dataset.task_name,
-            )
-
+        
     if cfg.resume:
         dataset = LeRobotDataset(
             cfg.dataset.repo_id,

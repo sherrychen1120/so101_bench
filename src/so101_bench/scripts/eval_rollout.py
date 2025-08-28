@@ -233,11 +233,10 @@ def roll_out_eval_episodes(
     events = {
         "stop_recording": False,
     }
-    # No VideoEncodingManager needed since we're not recording LeRobot format
     eval_episode_idx = 0
     while eval_episode_idx < len(eval_episodes) and not events["stop_recording"]:
         episode_name = eval_episodes[eval_episode_idx]
-        log_say(f"Evaluating episode {eval_episode_idx} | Source episode: {source_dataset_name}__{episode_name}", cfg.play_sounds)
+        log_say(f"Evaluating episode {eval_episode_idx}/{len(eval_episodes)} | Source episode: {source_dataset_name}__{episode_name}", cfg.play_sounds)
         
         # Load source task config
         source_task_config = load_source_task_config(source_dataset_dir, episode_name)
@@ -410,6 +409,11 @@ def eval_rollout(cfg: RecordConfig):
     if not cfg.dataset.save_raw_format:
         raise ValueError("Raw recorder is required for evaluation")
     
+    dataset_task_config_path = source_dataset_dir / "task_config.yaml"
+    if not dataset_task_config_path.exists():
+        raise ValueError(f"Source task config not found: {dataset_task_config_path}")
+    dataset_task_config = load_yaml(dataset_task_config_path)
+    
     raw_recorder = RawDatasetRecorder(
         dataset_name=cfg.eval_dataset.name,
         root_dir=cfg.dataset.raw_format_root,
@@ -418,6 +422,7 @@ def eval_rollout(cfg: RecordConfig):
         robot_calibration_fpath=robot.calibration_fpath,
         teleop_config=asdict(cfg.teleop),
         teleop_calibration_fpath=teleop.calibration_fpath,
+        dataset_task_config=dataset_task_config,
         fps=cfg.dataset.fps,
         save_videos=cfg.dataset.raw_format_videos,
         image_writer_processes=cfg.dataset.num_image_writer_processes,

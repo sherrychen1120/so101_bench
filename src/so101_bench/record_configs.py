@@ -86,6 +86,8 @@ class DatasetRecordConfig:
 @dataclass
 class EvalDatasetConfig:
     name: str = None
+    # This refers to the splits from the source dataset
+    # that will be used for evaluation.
     # Choose from: train, val_id, val_ood
     splits: list[str] = None
     

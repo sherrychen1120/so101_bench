@@ -23,6 +23,7 @@ from PIL import Image
 
 from lerobot.datasets.image_writer import AsyncImageWriter
 
+EMERGENCY_STOP_EVENT = "WARNING_EMERGENCY_STOP_PRESSED"
 
 class RawDatasetRecorder:
     """Records robot data in a raw, human-readable format alongside LeRobot format."""
@@ -31,7 +32,7 @@ class RawDatasetRecorder:
     TASK_CONFIG_FILENAME = "task_config.yaml"
 
     EVENTS_TO_RECORD = {
-        "emergency_stop": "WARNING_EMERGENCY_STOP_PRESSED",
+        "emergency_stop": EMERGENCY_STOP_EVENT,
     }
     
     def __init__(
@@ -45,6 +46,7 @@ class RawDatasetRecorder:
         robot_calibration_fpath: Path,
         teleop_config: Dict[str, Any],
         teleop_calibration_fpath: Path,
+        dataset_task_config: Dict[str, Any] | None,
         fps: int = 30,
         save_videos: bool = True,
         image_writer_processes: int = 0,
@@ -89,6 +91,13 @@ class RawDatasetRecorder:
 
         # Save camera configs
         self._save_camera_configs(robot_config)
+
+        # Save task config at the dataset level.
+        if dataset_task_config is not None:
+            self.dataset_task_config = dataset_task_config
+            task_config_file = self.dataset_dir / self.TASK_CONFIG_FILENAME
+            with open(task_config_file, "w") as f:
+                yaml.dump(dataset_task_config, f, default_flow_style=False, sort_keys=False)
         
         # Initialize manifest file
         self.manifest_file = self.dataset_dir / self.MANIFEST_FILENAME
@@ -232,6 +241,9 @@ class RawDatasetRecorder:
             json.dump(episode_metadata, f, indent=2)
         
         if task_config is not None:
+            assert task_config["task_name"] == self.dataset_task_config["task_name"], \
+                f"Task name mismatch. Episode: {task_config['task_name']}; "\
+                f"Dataset: {self.dataset_task_config['task_name']}"
             self.task_config = task_config
             task_config_file = self.current_episode_dir / self.TASK_CONFIG_FILENAME
             with open(task_config_file, "w") as f:
