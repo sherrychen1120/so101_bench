@@ -43,6 +43,7 @@ lerobot-record \
 ```
 """
 
+import cv2
 import logging
 import time
 from copy import deepcopy
@@ -97,7 +98,7 @@ from lerobot.utils.utils import (
     init_logging,
     log_say,
 )
-from lerobot.utils.visualization_utils import _init_rerun, log_rerun_data
+from lerobot.utils.visualization_utils import _init_rerun, log_rerun_data, visualize_camera_feeds
 
 from so101_bench.raw_dataset_recorder import RawDatasetRecorder
 from so101_bench.task_configurator import TaskConfigurator
@@ -223,7 +224,8 @@ def record_loop(
             )
 
         if display_data:
-            log_rerun_data(observation, action)
+            # log_rerun_data(observation, action)
+            visualize_camera_feeds(observation)
 
         dt_s = time.perf_counter() - start_loop_t
         busy_wait(1 / fps - dt_s)
@@ -235,8 +237,8 @@ def record_loop(
 def record(cfg: RecordConfig) -> LeRobotDataset:
     init_logging()
     logging.info(pformat(asdict(cfg)))
-    if cfg.display_data:
-        _init_rerun(session_name="recording")
+    # if cfg.display_data:
+    #     _init_rerun(session_name="recording")
 
     robot = make_robot_from_config(cfg.robot)
     teleop = make_teleoperator_from_config(cfg.teleop) if cfg.teleop is not None else None
@@ -414,6 +416,9 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
 
     if raw_recorder is not None:
         raw_recorder.cleanup()
+
+    if cfg.display_data:
+        cv2.destroyAllWindows()
 
     if cfg.dataset.push_to_hub:
         dataset.push_to_hub(tags=cfg.dataset.tags, private=cfg.dataset.private)

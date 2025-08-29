@@ -19,13 +19,13 @@
 # Replace VENDOR_ID, PRODUCT_ID, and USB_PATH with actual values
 
 # Camera 1 (plugged in front of desktop) /dev/cam_top
-SUBSYSTEM=="video4linux", ATTRS{idVendor}=="3443", ATTRS{idProduct}=="60bb", ENV{ID_PATH}=="pci-0000:06:00.1-usb-0:4:1.0", KERNEL=="video[02468]*", SYMLINK+="cam_top", MODE="0666", GROUP="video"
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="3443", ATTRS{idProduct}=="60bb", ENV{ID_PATH}=="pci-0000:06:00.1-usb-0:4:1.0", ENV{ID_V4L_CAPABILITIES}=="*:capture:*", SYMLINK+="cam_top", MODE="0666", GROUP="video"
 
 # Camera 2: (plugged in back of desktop) /dev/cam_front    
-SUBSYSTEM=="video4linux", ATTRS{idVendor}=="3443", ATTRS{idProduct}=="60bb", ENV{ID_PATH}=="pci-0000:0b:00.3-usb-0:1:1.0", KERNEL=="video[02468]*", SYMLINK+="cam_front", MODE="0666", GROUP="video"
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="3443", ATTRS{idProduct}=="60bb", ENV{ID_PATH}=="pci-0000:0b:00.3-usb-0:1:1.0", ENV{ID_V4L_CAPABILITIES}=="*:capture:*", SYMLINK+="cam_front", MODE="0666", GROUP="video"
 
 # Camera 3: (plugged in back of desktop, lower row) /dev/cam_wrist   
-SUBSYSTEM=="video4linux", ATTRS{idVendor}=="05a3", ATTRS{idProduct}=="9230", ENV{ID_PATH}=="pci-0000:06:00.1-usb-0:2:1.0", KERNEL=="video[02468]*", SYMLINK+="cam_wrist", MODE="0666", GROUP="video"
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="05a3", ATTRS{idProduct}=="9230", ENV{ID_PATH}=="pci-0000:06:00.1-usb-0:2:1.0", ENV{ID_V4L_CAPABILITIES}=="*:capture:*", SYMLINK+="cam_wrist", MODE="0666", GROUP="video"
 
 # EXAMPLE with real values (uncomment and modify):
 # Front camera with serial ABC123

@@ -104,7 +104,7 @@ class EvalDatasetConfig:
 class RecordConfig:
     robot: RobotConfig
     dataset: DatasetRecordConfig
-    eval_dataset: EvalDatasetConfig
+    eval_dataset: EvalDatasetConfig | None = None
     # Whether to control the robot with a teleoperator
     teleop: TeleoperatorConfig | None = None
     # Whether to control the robot with a policy
