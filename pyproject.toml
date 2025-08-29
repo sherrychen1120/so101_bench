@@ -14,8 +14,16 @@ dependencies = [
   "numpy",
   "opencv-python",
   "pyyaml",
-  "pytest",
-  "lerobot @ file://third_party/lerobot",
+  "pytest==8.4.1",
+  "aiohttp==3.12.15",
+  "feetech-servo-sdk==1.0.0",
+  "ffmpeg==1.4",
+  "hf-transfer==0.1.9",
+  "inquirerpy==0.3.4",
+  "lerobot",
+  "pip==25.2",
+  "psutil==7.0.0",
+  "wheel==0.45.1",
 ]
 
 [tool.setuptools]
@@ -24,3 +32,11 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["so101_bench*"]
+
+[tool.uv.workspace]
+members = [
+    "third_party/lerobot",
+]
+
+[tool.uv.sources]
+lerobot = { workspace = true }
