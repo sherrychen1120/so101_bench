@@ -59,6 +59,7 @@ import json
 import logging
 import os
 import time
+import shutil
 from deepdiff import DeepDiff
 from datetime import datetime, timezone
 from pathlib import Path
@@ -162,6 +163,11 @@ class RawDatasetRecorder:
             )
         
         logging.info(f"Raw dataset recorder initialized at {self.dataset_dir}")
+    
+    def remove_current_episode_directory(self):
+        if hasattr(self, "current_episode_dir") and self.current_episode_dir is not None:
+            logging.info(f"[RawDatasetRecorder] Removing current episode directory: {self.current_episode_dir}")
+            shutil.rmtree(self.current_episode_dir)
     
     def reset_episode_data(self):
         # Current episode data
