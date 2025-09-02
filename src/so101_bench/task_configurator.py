@@ -619,7 +619,7 @@ class StratifiedSampler:
                 
                 output_data['sampling_outputs'][bin_id] = {
                     'count': len(episodes),
-                    'episodes': episodes,
+                    'episodes': sorted(episodes),
                     'bin_ranges': clean_bin_ranges,
                     'bin_indices': indices
                 }

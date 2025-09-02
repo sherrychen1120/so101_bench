@@ -146,10 +146,11 @@ def eval_policy_on_dataset(
                     total_loss_dict[k] = 0.0
                 total_loss_dict[k] += v
             num_batches += 1
-    
+
     # Average across batches.
     avg_loss = total_loss / num_batches if num_batches > 0 else float('inf')
     for k in total_loss_dict.keys():
+        v = total_loss_dict[k]
         total_loss_dict[k] = v / num_batches if num_batches > 0 else float('inf')
     
     return {
@@ -479,7 +480,7 @@ def train(cfg: TrainPipelineConfig):
                     use_amp=cfg.policy.use_amp,
                 )
                 eval_time = time.perf_counter() - start_time
-                current_eval_loss = eval_results['eval_loss']
+                current_eval_loss = eval_results["eval_loss"]
                 
                 logging.info(f"Hold-out dataset eval loss: {current_eval_loss:.4f} (time: {eval_time:.2f}s)")
                 
@@ -512,7 +513,7 @@ def train(cfg: TrainPipelineConfig):
                 wandb_logger.log_policy(checkpoint_dir)
             
             # Save to manifest
-            current_train_loss = train_tracker.loss.avg if hasattr(train_tracker.loss, 'avg') else None
+            current_train_loss = train_tracker.loss.val
             save_checkpoint_manifest(
                 cfg.output_dir,
                 step,
