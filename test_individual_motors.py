@@ -19,6 +19,7 @@ from lerobot.teleoperators.so101_leader.config_so101_leader import SO101LeaderCo
 from lerobot.robots.so101_follower.so101_follower import SO101Follower
 from lerobot.robots.so101_follower.config_so101_follower import SO101FollowerConfig
 import logging
+from lerobot.utils.utils import init_logging
 
 def load_calibration(cal_path):
     """Load calibration from JSON file"""
@@ -58,8 +59,9 @@ def test_motor_bus(port, calibration_path, name):
             'elbow_flex': Motor(3, 'sts3215', norm_mode_body),
             'wrist_flex': Motor(4, 'sts3215', norm_mode_body),
             'wrist_roll': Motor(5, 'sts3215', norm_mode_body),
-            'gripper': Motor(6, 'sts3215', MotorNormMode.RANGE_0_100),
         }
+        if name == 'LEADER':
+            motors['gripper'] = Motor(6, 'sts3215', MotorNormMode.RANGE_0_100)
         
         # Load calibration and create bus
         calibration = load_calibration(calibration_path)
@@ -162,9 +164,10 @@ def test_so101_follower(port, calibration_path):
         print(f'SO101Follower test FAILED: {e}')
         return False
 
-def test_interleaved_10hz(leader_port, leader_cal_path, follower_port, follower_cal_path, duration=10.0):
+def test_interleaved_10hz(leader_port, leader_cal_path, follower_port, follower_cal_path, duration=5.0):
     """Test interleaved get_action() and get_observation() at 10Hz"""
-    print(f'\n=== Testing Interleaved Operation at 10Hz ===')
+    target_freq = 30.0
+    print(f'\n=== Testing Interleaved Operation at {target_freq}Hz ===')
     try:
         # Create configurations
         leader_config = SO101LeaderConfig(
@@ -178,8 +181,10 @@ def test_interleaved_10hz(leader_port, leader_cal_path, follower_port, follower_
             id='dum_e_follower',
             port=follower_port,
             use_degrees=False,
+            camera_configs_path='/home/melon/sherry/so101_bench/bringup/camera_configs.json',
             cameras={},  # No cameras for this test
-            calibration_dir=Path(follower_cal_path).parent
+            calibration_dir=Path(follower_cal_path).parent,
+            max_relative_target=3.0,
         )
         
         # Instantiate both classes
@@ -192,8 +197,6 @@ def test_interleaved_10hz(leader_port, leader_cal_path, follower_port, follower_
         follower.connect(calibrate=False)
         print('Both devices connected successfully')
         
-        # 10Hz timing setup
-        target_freq = 10.0  # Hz
         target_period = 1.0 / target_freq  # 0.1 seconds
         
         print(f'Running interleaved operations for {duration} seconds at {target_freq}Hz...')
@@ -206,13 +209,6 @@ def test_interleaved_10hz(leader_port, leader_cal_path, follower_port, follower_
         while time.time() - start_time < duration:
             loop_start = time.time()
             
-            # Get action from leader
-            leader_start = time.time()
-            action = leader.get_action()
-            leader_end = time.time()
-            leader_time = (leader_end - leader_start) * 1000  # ms
-            timing_stats['leader_times'].append(leader_time)
-            
             # Get observation from follower
             follower_start = time.time()
             observation = follower.get_observation()
@@ -220,12 +216,20 @@ def test_interleaved_10hz(leader_port, leader_cal_path, follower_port, follower_
             follower_time = (follower_end - follower_start) * 1000  # ms
             timing_stats['follower_times'].append(follower_time)
 
+            # Get action from leader
+            leader_start = time.time()
+            action = leader.get_action()
+            leader_end = time.time()
+            leader_time = (leader_end - leader_start) * 1000  # ms
+            timing_stats['leader_times'].append(leader_time)
+
+            # use follower observation as the action (don't move the follower)
             follower_send_start = time.time()
-            follower.send_action(action)
+            follower.send_action(observation)
             follower_send_end = time.time()
             follower_send_time = (follower_send_end - follower_send_start) * 1000  # ms
             timing_stats['follower_send_times'].append(follower_send_time)
-            time.sleep(0.05)  # 50ms delay to allow bus recovery after write
+            # time.sleep(0.05)  # 50ms delay to allow bus recovery after write
             
             loop_end = time.time()
             loop_time = (loop_end - loop_start) * 1000  # ms
@@ -238,14 +242,15 @@ def test_interleaved_10hz(leader_port, leader_cal_path, follower_port, follower_
             elapsed = time.time() - start_time
             actual_freq = loop_count / elapsed
             print(f'  Loop {loop_count}: {actual_freq:.1f}Hz, '
-                    f'Leader: {leader_time:.1f}ms, '
                     f'Follower: {follower_time:.1f}ms, '
+                    f'Leader: {leader_time:.1f}ms, '
                     f'Follower Send: {follower_send_time:.1f}ms, '
                     f'Total: {loop_time:.1f}ms')
             
             # Sleep to maintain 10Hz
             elapsed_loop_time = time.time() - loop_start
             if elapsed_loop_time < target_period:
+                print(f'  Sleeping for {target_period - elapsed_loop_time:.1f}s to maintain 10Hz')
                 time.sleep(target_period - elapsed_loop_time)
         
         # Calculate statistics
@@ -254,10 +259,12 @@ def test_interleaved_10hz(leader_port, leader_cal_path, follower_port, follower_
         
         leader_avg = sum(timing_stats['leader_times']) / len(timing_stats['leader_times'])
         follower_avg = sum(timing_stats['follower_times']) / len(timing_stats['follower_times'])
+        follower_send_avg = sum(timing_stats['follower_send_times']) / len(timing_stats['follower_send_times'])
         loop_avg = sum(timing_stats['loop_times']) / len(timing_stats['loop_times'])
         
         leader_max = max(timing_stats['leader_times'])
         follower_max = max(timing_stats['follower_times'])
+        follower_send_max = max(timing_stats['follower_send_times'])
         loop_max = max(timing_stats['loop_times'])
         
         print(f'\n--- 10Hz Interleaved Test Results ---')
@@ -267,9 +274,13 @@ def test_interleaved_10hz(leader_port, leader_cal_path, follower_port, follower_
         print(f'Actual frequency: {actual_freq:.1f}Hz')
         print(f'Leader get_action() - Avg: {leader_avg:.1f}ms, Max: {leader_max:.1f}ms')
         print(f'Follower get_observation() - Avg: {follower_avg:.1f}ms, Max: {follower_max:.1f}ms')
+        print(f'Follower Send: {follower_send_time:.1f}ms, Avg: {follower_send_avg:.1f}ms, Max: {follower_send_max:.1f}ms')
         print(f'Total loop time - Avg: {loop_avg:.1f}ms, Max: {loop_max:.1f}ms')
         
         success = actual_freq >= target_freq * 0.9  # Allow 10% tolerance
+
+        # print('Waiting for 500ms...')
+        # time.sleep(0.5)
         
         # Disconnect both
         leader.disconnect()
@@ -400,28 +411,36 @@ def test_minimal_send_read_loop(follower_port, follower_cal_path):
         print(f'Initial observation successful')
         
         # Test simple loop: send_action -> get_observation
-        for i in range(5):
+        for i in range(100):
             print(f'\nIteration {i+1}:')
             
             # Send action (write)
             try:
+                start_time = time.time()
                 sent = follower.send_action(action)
                 print(f'  ✅ send_action successful')
+                end_time = time.time()
+                dt_follower_send = (end_time - start_time) * 1000  # ms
             except Exception as e:
                 print(f'  ❌ send_action failed: {e}')
                 break
             
             # Small delay
-            time.sleep(0.1)  # 100ms delay
+            time.sleep(1 / 30.0)  # 30Hz delay
             
             # Get observation (read)
             try:
+                start_time = time.time()
                 obs = follower.get_observation()
                 print(f'  ✅ get_observation successful')
+                end_time = time.time()
+                dt_follower_get = (end_time - start_time) * 1000  # ms
             except Exception as e:
                 print(f'  ❌ get_observation failed: {e}')
                 traceback.print_exc()
                 break
+            
+            print(f'Loop {i+1}: send_action: {dt_follower_send:.1f}ms, get_observation: {dt_follower_get:.1f}ms')
         
         follower.disconnect()
         return True
@@ -433,7 +452,8 @@ def test_minimal_send_read_loop(follower_port, follower_cal_path):
 
 def main():
     """Main test function"""
-    logging.basicConfig(level=logging.INFO)
+    # logging.basicConfig(level=logging.INFO)
+    init_logging(console_level='DEBUG')
     
     print("SO-101 Individual Motor Testing")
     print("=" * 40)
@@ -445,47 +465,49 @@ def main():
     
     # Test individual motor buses
     print("\n2. MOTOR BUS TESTING")
+
+    follower_cal_path = '/home/melon/sherry/lerobot/calibration/robots/so101_follower/dum_e_follower.json'
     
-    follower_success = test_motor_bus(
-        '/dev/so101_follower',
-        '/home/melon/sherry/lerobot/calibration/robots/so101_follower/dum_e_follower.json',
-        'FOLLOWER'
-    )
+    # follower_success = test_motor_bus(
+    #     '/dev/so101_follower',
+    #     follower_cal_path,
+    #     'FOLLOWER'
+    # )
     
-    leader_success = test_motor_bus(
-        '/dev/so101_leader', 
-        '/home/melon/sherry/lerobot/calibration/teleoperators/so101_leader/dum_e_leader.json',
-        'LEADER'
-    )
+    # leader_success = test_motor_bus(
+    #     '/dev/so101_leader', 
+    #     '/home/melon/sherry/lerobot/calibration/teleoperators/so101_leader/dum_e_leader.json',
+    #     'LEADER'
+    # )
     
-    # Test SO101 classes
-    print("\n3. SO101 CLASS TESTING")
+    # # Test SO101 classes
+    # print("\n3. SO101 CLASS TESTING")
     
-    leader_class_success = test_so101_leader(
-        '/dev/so101_leader',
-        '/home/melon/sherry/lerobot/calibration/teleoperators/so101_leader/dum_e_leader.json'
-    )
+    # leader_class_success = test_so101_leader(
+    #     '/dev/so101_leader',
+    #     '/home/melon/sherry/lerobot/calibration/teleoperators/so101_leader/dum_e_leader.json'
+    # )
     
-    follower_class_success = test_so101_follower(
-        '/dev/so101_follower',
-        '/home/melon/sherry/lerobot/calibration/robots/so101_follower/dum_e_follower.json'
-    )
+    # follower_class_success = test_so101_follower(
+    #     '/dev/so101_follower',
+    #     follower_cal_path
+    # )
     
-    # Test follower send_action issue
-    print("\n4. FOLLOWER SEND_ACTION ISSUE TESTING")
+    # # Test follower send_action issue
+    # print("\n4. FOLLOWER SEND_ACTION ISSUE TESTING")
     
-    send_action_success = test_follower_send_action_issue(
-        '/dev/so101_follower',
-        '/home/melon/sherry/lerobot/calibration/robots/so101_follower/dum_e_follower.json'
-    )
+    # send_action_success = test_follower_send_action_issue(
+    #     '/dev/so101_follower',
+    #     follower_cal_path
+    # )
     
-    # Test minimal send-read loop
-    print("\n5. MINIMAL SEND-READ LOOP TESTING")
+    # # Test minimal send-read loop
+    # print("\n5. MINIMAL SEND-READ LOOP TESTING")
     
-    minimal_loop_success = test_minimal_send_read_loop(
-        '/dev/so101_follower',
-        '/home/melon/sherry/lerobot/calibration/robots/so101_follower/dum_e_follower.json'
-    )
+    # minimal_loop_success = test_minimal_send_read_loop(
+    #     '/dev/so101_follower',
+    #     follower_cal_path
+    # )
     
     # Test 10Hz interleaved operation
     print("\n6. 10HZ INTERLEAVED TESTING")
@@ -494,31 +516,31 @@ def main():
         '/dev/so101_leader',
         '/home/melon/sherry/lerobot/calibration/teleoperators/so101_leader/dum_e_leader.json',
         '/dev/so101_follower',
-        '/home/melon/sherry/lerobot/calibration/robots/so101_follower/dum_e_follower.json',
-        duration=10.0  # Run for 10 seconds
+        follower_cal_path,
+        duration=5.0  # Run for 10 seconds
     )
     
     # Summary
     print("\n" + "=" * 40)
     print("TEST SUMMARY:")
     # print(f"Port scanning: {'✅' if follower_scan and leader_scan else '❌'}")
-    print(f"Follower bus: {'✅' if follower_success else '❌'}")
-    print(f"Leader bus: {'✅' if leader_success else '❌'}")
-    print(f"SO101Leader class: {'✅' if leader_class_success else '❌'}")
-    print(f"SO101Follower class: {'✅' if follower_class_success else '❌'}")
-    print(f"Send action issue test: {'✅' if send_action_success else '❌'}")
-    print(f"Minimal send-read loop: {'✅' if minimal_loop_success else '❌'}")
+    # print(f"Follower bus: {'✅' if follower_success else '❌'}")
+    # print(f"Leader bus: {'✅' if leader_success else '❌'}")
+    # print(f"SO101Leader class: {'✅' if leader_class_success else '❌'}")
+    # print(f"SO101Follower class: {'✅' if follower_class_success else '❌'}")
+    # print(f"Send action issue test: {'✅' if send_action_success else '❌'}")
+    # print(f"Minimal send-read loop: {'✅' if minimal_loop_success else '❌'}")
     print(f"10Hz interleaved: {'✅' if interleaved_success else '❌'}")
     
-    all_tests_passed = (follower_success and leader_success and 
-                       leader_class_success and follower_class_success and
-                       send_action_success and minimal_loop_success and interleaved_success)
+    # all_tests_passed = (follower_success and leader_success and 
+    #                    leader_class_success and follower_class_success and
+    #                    send_action_success and minimal_loop_success and interleaved_success)
     
-    if all_tests_passed:
-        print("\n✅ All tests passed!")
-        print("Motor buses, SO101 classes, and 10Hz operation are all working correctly.")
-    else:
-        print("\n❌ Some tests failed. Check individual results above.")
+    # if all_tests_passed:
+    #     print("\n✅ All tests passed!")
+    #     print("Motor buses, SO101 classes, and 10Hz operation are all working correctly.")
+    # else:
+    #     print("\n❌ Some tests failed. Check individual results above.")
 
 if __name__ == '__main__':
     main()
