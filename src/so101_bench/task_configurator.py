@@ -317,6 +317,8 @@ class StratifiedSampler:
         
         for axis_name in self.sorted_axis_names:
             axis_range = self.axes[axis_name]
+            # TODO: Update to just num_bins! Because that is how 
+            # it's being used right now anyways... 
             bin_size = self.bin_sizes[axis_name]
             start, end = axis_range
             

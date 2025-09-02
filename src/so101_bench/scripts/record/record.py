@@ -338,6 +338,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
     events = {
         "stop_recording": False,
     }
+    listener = None
     with VideoEncodingManager(dataset):
         recorded_episodes = 0
         while recorded_episodes < num_episodes_to_record and not events["stop_recording"]:
