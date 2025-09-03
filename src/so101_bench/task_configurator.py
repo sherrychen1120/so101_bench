@@ -44,10 +44,10 @@ class TaskConfigurator:
     def generate_task_config_for_dataset(self):
         return {"task_name": self.task_name}
     
-    def determine_sampling_plan(self) -> bool:
+    def determine_sampling_plan(self) -> tuple[bool, int]:
         if self.stratified_sampler is not None:
             return self.stratified_sampler.get_sampling_plan()
-        return False
+        return False, 0
     
     def log_episode_sample(self, episode_name: str):
         if self.stratified_sampler is not None:

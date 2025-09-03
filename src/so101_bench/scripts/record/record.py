@@ -122,6 +122,7 @@ def record_loop(
     control_time_s: int | None = None,
     single_task: str | None = None,
     display_data: bool = False,
+    record_lerobot_dataset: bool = True,
 ):
     if dataset is not None and dataset.fps != fps:
         raise ValueError(f"The dataset fps should be equal to requested fps ({dataset.fps} != {fps}).")
@@ -179,7 +180,6 @@ def record_loop(
             observation_no_timestamp = {k: v for k, v in observation.items() if not k.endswith("_timestamp")}
             observation_frame = build_dataset_frame(dataset.features, observation_no_timestamp, prefix="observation")
 
-        if policy is not None:
             action_values = predict_action(
                 observation_frame,
                 policy,
@@ -212,7 +212,8 @@ def record_loop(
         # so action actually sent is saved in the dataset.
         sent_action = robot.send_action(action)
 
-        if dataset is not None:
+        if record_lerobot_dataset:
+            assert dataset is not None
             sent_action_no_timestamp = {k: v for k, v in sent_action.items() if k != "action_timestamp"}
             action_frame = build_dataset_frame(dataset.features, sent_action_no_timestamp, prefix="action")
             frame = {**observation_frame, **action_frame}
@@ -272,6 +273,15 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                 sampler_config_fpath=sampler_config_fpath,
             )
             dataset_task_config = task_configurator.generate_task_config_for_dataset()
+        
+        if cfg.policy is not None:
+            policy_info = {
+                "policy_path": getattr(cfg.policy, "pretrained_path", None),
+                "policy_name": policy.__class__.__name__,
+            }
+        else:
+            policy_info = None
+
         raw_recorder = RawDatasetRecorder(
             dataset_name=dataset_name,
             root_dir=raw_root,
@@ -280,6 +290,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
             robot_calibration_fpath=robot.calibration_fpath,
             teleop_config=asdict(cfg.teleop),
             teleop_calibration_fpath=teleop.calibration_fpath,
+            policy_info=policy_info,
             dataset_task_config=dataset_task_config,
             fps=cfg.dataset.fps,
             save_videos=cfg.dataset.raw_format_videos,

@@ -8,7 +8,7 @@ This script can be used to:
 3. Generate and save a stratified_sampling_output.yaml file
 
 Usage:
-    python generate_stratified_sampling_output.py \
+    python so101_bench.scripts.inspect_dataset_sample_coverage \
         --dataset_dir /path/to/raw/dataset \
         --stratified_config /path/to/stratified_sampling_config.yaml \
         --tasks_dir /path/to/tasks \
@@ -84,6 +84,17 @@ def main():
     # Show current distribution
     total_episodes = sum(len(episodes) for episodes in sampler.episodes_per_bin.values())
     print(f"\nLoaded {total_episodes} episodes total")
+
+    # =======================================================
+    # Uncomment this block if you just want to sample more episodes per bin.
+    # Comment out the code below that saves the updated sampling output.
+    # i = 0
+    # while True:
+    #     sample = sampler.sample_task_config_values()
+    #     if sample is None:
+    #         break
+    #     sampler.log_episode_sample(f"dummy_ep_{i}")
+    # =======================================================
     
     print(f"\nSaving sampling output")
     sampler.save_sampling_output()
