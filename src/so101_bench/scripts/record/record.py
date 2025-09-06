@@ -180,6 +180,7 @@ def record_loop(
             observation_no_timestamp = {k: v for k, v in observation.items() if not k.endswith("_timestamp")}
             observation_frame = build_dataset_frame(dataset.features, observation_no_timestamp, prefix="observation")
 
+        if policy is not None:
             action_values = predict_action(
                 observation_frame,
                 policy,
@@ -417,6 +418,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                     control_time_s=cfg.dataset.reset_time_s,
                     single_task=cfg.dataset.single_task,
                     display_data=cfg.display_data,
+                    record_lerobot_dataset=False,
                 )
 
             if events["rerecord_episode"]:
