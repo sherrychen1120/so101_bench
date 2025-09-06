@@ -211,3 +211,6 @@ calibration/
 
 # recordings
 recordings/
+
+# Training outputs
+outputs/

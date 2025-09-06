@@ -75,6 +75,8 @@ class DatasetRecordConfig:
     tasks_dir: str | Path | None = None
     # Name of the specific task to use for configuration
     task_name: str | None = None
+    # Path to stratified sampling configuration file
+    stratified_sampling_config: str | Path | None = None
 
     def __post_init__(self):
         if self.single_task is None:
@@ -104,7 +106,7 @@ class EvalDatasetConfig:
 class RecordConfig:
     robot: RobotConfig
     dataset: DatasetRecordConfig
-    eval_dataset: EvalDatasetConfig
+    eval_dataset: EvalDatasetConfig | None = None
     # Whether to control the robot with a teleoperator
     teleop: TeleoperatorConfig | None = None
     # Whether to control the robot with a policy
