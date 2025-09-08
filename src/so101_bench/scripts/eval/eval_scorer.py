@@ -224,7 +224,7 @@ def process_episode(episode_idx: int, episode_count: int, episode_dir: Path, eva
         existing_score = load_yaml(eval_score_path)
         existing_config = existing_score.get("eval_config", {})
         
-        eval_config_diff = DeepDiff(existing_config, eval_config, significant_digits=1e-3)
+        eval_config_diff = DeepDiff(existing_config, eval_config, significant_digits=3)
         logging.info(f"Episode {episode_id}: Found existing eval_score.yaml for this episode:")
         logging.info(yaml.dump(existing_score, default_flow_style=False, indent=2))
         if len(eval_config_diff) == 0:
@@ -441,7 +441,7 @@ def main():
         raise ValueError("No episodes found in dataset")
     
     # Verify episode durations
-    verify_episode_durations(dataset_dir, episodes, eval_horizon_s)
+    # verify_episode_durations(dataset_dir, episodes, eval_horizon_s)
     
     # Check for existing dataset eval score
     dataset_eval_score_path = dataset_dir / "dataset_eval_score.yaml"

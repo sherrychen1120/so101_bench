@@ -59,6 +59,7 @@ import json
 import logging
 import os
 import time
+import shutil
 from deepdiff import DeepDiff
 from datetime import datetime, timezone
 from pathlib import Path
@@ -93,8 +94,9 @@ class RawDatasetRecorder:
         # instead of dictionaries.
         robot_config: Dict[str, Any],
         robot_calibration_fpath: Path,
-        teleop_config: Dict[str, Any],
-        teleop_calibration_fpath: Path,
+        teleop_config: Dict[str, Any] | None,
+        teleop_calibration_fpath: Path | None,
+        policy_info: Dict[str, Any] | None,
         dataset_task_config: Dict[str, Any] | None,
         fps: int = 30,
         save_videos: bool = True,
@@ -120,6 +122,7 @@ class RawDatasetRecorder:
         self.root_dir = Path(root_dir)
         self.robot_config = robot_config
         self.teleop_config = teleop_config
+        self.policy_info = policy_info
         self.fps = fps
         self.save_videos = save_videos
         
@@ -136,10 +139,13 @@ class RawDatasetRecorder:
 
         # Save leader and follower arm calibration
         self._save_arm_calibration(robot_calibration_fpath, robot_config)
-        self._save_arm_calibration(teleop_calibration_fpath, teleop_config)
+        if teleop_config is not None:
+            self._save_arm_calibration(teleop_calibration_fpath, teleop_config)
 
         # Save camera configs
         self._save_camera_configs(robot_config)
+
+        self._save_policy_info(policy_info)
 
         # Save task config at the dataset level.
         if dataset_task_config is not None:
@@ -162,6 +168,11 @@ class RawDatasetRecorder:
             )
         
         logging.info(f"Raw dataset recorder initialized at {self.dataset_dir}")
+    
+    def remove_current_episode_directory(self):
+        if hasattr(self, "current_episode_dir") and self.current_episode_dir is not None:
+            logging.info(f"[RawDatasetRecorder] Removing current episode directory: {self.current_episode_dir}")
+            shutil.rmtree(self.current_episode_dir)
     
     def reset_episode_data(self):
         # Current episode data
@@ -221,6 +232,23 @@ class RawDatasetRecorder:
         else:
             with open(configs_write_path, "w") as f:
                 json.dump(robot_config["cameras"], f, indent=2)
+    
+    def _save_policy_info(self, policy_info: dict | None):
+        if policy_info is None:
+            return
+        policy_info_file = self.dataset_dir / "policy_info.json"
+        if os.path.exists(policy_info_file):
+            existing_policy_info = json.load(open(policy_info_file))
+            incoming_policy_info = json.loads(json.dumps(policy_info, indent=2))
+            diff = DeepDiff(existing_policy_info, incoming_policy_info, significant_digits=3)
+            if diff:
+                raise ValueError(f"Cannot record to same dataset_dir: "
+                    f"{self.dataset_dir} with different policy info: "
+                    f"{existing_policy_info} != {incoming_policy_info}"
+                )
+        else:
+            with open(policy_info_file, "w") as f:
+                json.dump(policy_info, f, indent=2)
 
     def start_episode(
         self,
