@@ -323,7 +323,7 @@ class StratifiedSampler:
             start, end = axis_range
             
             # Compute number of bins for this axis
-            num_bins = int(np.ceil((end - start) / bin_size))
+            num_bins = int(np.round((end - start) / bin_size))
             self.bin_count_per_axis[axis_name] = num_bins
             
             # Compute bin edges
