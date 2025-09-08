@@ -460,54 +460,54 @@ def main():
     
     # Test port scanning
     print("\n1. PORT SCANNING TEST")
-    # follower_scan = test_port_scan('/dev/so101_follower')
-    # leader_scan = test_port_scan('/dev/so101_leader')
+    follower_scan = test_port_scan('/dev/so101_follower')
+    leader_scan = test_port_scan('/dev/so101_leader')
     
     # Test individual motor buses
     print("\n2. MOTOR BUS TESTING")
 
     follower_cal_path = '/home/melon/sherry/lerobot/calibration/robots/so101_follower/dum_e_follower.json'
     
-    # follower_success = test_motor_bus(
-    #     '/dev/so101_follower',
-    #     follower_cal_path,
-    #     'FOLLOWER'
-    # )
+    follower_success = test_motor_bus(
+        '/dev/so101_follower',
+        follower_cal_path,
+        'FOLLOWER'
+    )
     
-    # leader_success = test_motor_bus(
-    #     '/dev/so101_leader', 
-    #     '/home/melon/sherry/lerobot/calibration/teleoperators/so101_leader/dum_e_leader.json',
-    #     'LEADER'
-    # )
+    leader_success = test_motor_bus(
+        '/dev/so101_leader', 
+        '/home/melon/sherry/lerobot/calibration/teleoperators/so101_leader/dum_e_leader.json',
+        'LEADER'
+    )
     
-    # # Test SO101 classes
-    # print("\n3. SO101 CLASS TESTING")
+    # Test SO101 classes
+    print("\n3. SO101 CLASS TESTING")
     
-    # leader_class_success = test_so101_leader(
-    #     '/dev/so101_leader',
-    #     '/home/melon/sherry/lerobot/calibration/teleoperators/so101_leader/dum_e_leader.json'
-    # )
+    leader_class_success = test_so101_leader(
+        '/dev/so101_leader',
+        '/home/melon/sherry/lerobot/calibration/teleoperators/so101_leader/dum_e_leader.json'
+    )
     
-    # follower_class_success = test_so101_follower(
-    #     '/dev/so101_follower',
-    #     follower_cal_path
-    # )
+    follower_class_success = test_so101_follower(
+        '/dev/so101_follower',
+        follower_cal_path
+    )
     
-    # # Test follower send_action issue
-    # print("\n4. FOLLOWER SEND_ACTION ISSUE TESTING")
+    # Test follower send_action issue
+    print("\n4. FOLLOWER SEND_ACTION ISSUE TESTING")
     
-    # send_action_success = test_follower_send_action_issue(
-    #     '/dev/so101_follower',
-    #     follower_cal_path
-    # )
+    send_action_success = test_follower_send_action_issue(
+        '/dev/so101_follower',
+        follower_cal_path
+    )
     
-    # # Test minimal send-read loop
-    # print("\n5. MINIMAL SEND-READ LOOP TESTING")
+    # Test minimal send-read loop
+    print("\n5. MINIMAL SEND-READ LOOP TESTING")
     
-    # minimal_loop_success = test_minimal_send_read_loop(
-    #     '/dev/so101_follower',
-    #     follower_cal_path
-    # )
+    minimal_loop_success = test_minimal_send_read_loop(
+        '/dev/so101_follower',
+        follower_cal_path
+    )
     
     # Test 10Hz interleaved operation
     print("\n6. 10HZ INTERLEAVED TESTING")
@@ -523,13 +523,13 @@ def main():
     # Summary
     print("\n" + "=" * 40)
     print("TEST SUMMARY:")
-    # print(f"Port scanning: {'✅' if follower_scan and leader_scan else '❌'}")
-    # print(f"Follower bus: {'✅' if follower_success else '❌'}")
-    # print(f"Leader bus: {'✅' if leader_success else '❌'}")
-    # print(f"SO101Leader class: {'✅' if leader_class_success else '❌'}")
-    # print(f"SO101Follower class: {'✅' if follower_class_success else '❌'}")
-    # print(f"Send action issue test: {'✅' if send_action_success else '❌'}")
-    # print(f"Minimal send-read loop: {'✅' if minimal_loop_success else '❌'}")
+    print(f"Port scanning: {'✅' if follower_scan and leader_scan else '❌'}")
+    print(f"Follower bus: {'✅' if follower_success else '❌'}")
+    print(f"Leader bus: {'✅' if leader_success else '❌'}")
+    print(f"SO101Leader class: {'✅' if leader_class_success else '❌'}")
+    print(f"SO101Follower class: {'✅' if follower_class_success else '❌'}")
+    print(f"Send action issue test: {'✅' if send_action_success else '❌'}")
+    print(f"Minimal send-read loop: {'✅' if minimal_loop_success else '❌'}")
     print(f"10Hz interleaved: {'✅' if interleaved_success else '❌'}")
     
     # all_tests_passed = (follower_success and leader_success and 
