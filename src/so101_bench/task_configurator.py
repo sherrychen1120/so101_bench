@@ -221,6 +221,8 @@ class TaskConfigurator:
 class StratifiedSampler:
     """
     Handles stratified sampling for task configuration based on axes and bin sizes.
+    
+    TODO(sherry): Refactor this class. Separate the binning logic from the sampling logic.
     """
     
     def __init__(self, stratified_config_path: Path, task_spec: Dict[str, Any]):
