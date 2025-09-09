@@ -278,7 +278,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
         if cfg.policy is not None:
             policy_info = {
                 "policy_path": getattr(cfg.policy, "pretrained_path", None),
-                "policy_name": policy.__class__.__name__,
+                "policy_name": cfg.policy.__class__.__name__,
             }
         else:
             policy_info = None
