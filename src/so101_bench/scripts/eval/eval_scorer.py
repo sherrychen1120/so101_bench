@@ -188,7 +188,10 @@ def calculate_episode_metrics(progress_stage_labels: Dict[str, List[List[float]]
         if stage in stage_order:
             for interval in intervals:
                 end_time = interval[1]
-                if end_time > latest_time:
+                if abs(end_time - latest_time) < 0.001 and stage_order.index(stage) > stage_order.index(latest_stage):
+                    latest_stage = stage
+                    latest_time = end_time
+                elif end_time > latest_time:
                     latest_time = end_time
                     latest_stage = stage
     
@@ -202,7 +205,8 @@ def calculate_episode_metrics(progress_stage_labels: Dict[str, List[List[float]]
         }
     
     task_progress_score = score_definition.get(latest_stage, 0.0)
-    success = 1 if latest_stage == stage_order[-1] else 0
+    final_stage = stage_order[-1]
+    success = 1 if latest_stage == final_stage else 0
     duration_to_success_s = latest_time if success else -1.0
     
     return {
@@ -262,19 +266,19 @@ def process_episode(episode_idx: int, episode_count: int, episode_dir: Path, eva
     
     # Launch labeler for manual labeling
     fps = metadata.get("fps", 30.0)
-    progress_stage_labels = sorted(list(task_spec["score_definition"]["task_progress_score"].keys()))
+    progress_stage_names = sorted(list(task_spec["score_definition"]["task_progress_score"].keys()))
     horizon_s = eval_config.get("horizon_s")
     labeler_title = f"{episode_idx}/{episode_count}: {episode_id}"
-    labeler = TaskProgressLabeler(video_paths, progress_stage_labels, fps, horizon_s, labeler_title)
-    progress_stage_labels = labeler.play()
+    labeler = TaskProgressLabeler(video_paths, progress_stage_names, fps, horizon_s, labeler_title)
+    progress_stage_intervals = labeler.play()
     
     # Calculate metrics
-    episode_metrics = calculate_episode_metrics(progress_stage_labels, task_spec)
+    episode_metrics = calculate_episode_metrics(progress_stage_intervals, task_spec)
     
     # Calculate additional metrics
     frame_latency_ms = calculate_frame_latency_ms(sync_logs)
     is_safety_abort = check_safety_abort(metadata)
-    num_attempts = calculate_num_attempts(progress_stage_labels, task_spec)
+    num_attempts = calculate_num_attempts(progress_stage_intervals, task_spec)
     
     # Create eval score data
     eval_score_data = {
@@ -282,7 +286,7 @@ def process_episode(episode_idx: int, episode_count: int, episode_dir: Path, eva
         "eval_config": eval_config,
         "episode_metrics": {
             **episode_metrics,
-            "progress_stage_timerange_s": progress_stage_labels,
+            "progress_stage_timerange_s": progress_stage_intervals,
             "frame_latency_ms": round(frame_latency_ms, 1),
             "is_safety_abort": is_safety_abort,
             "num_attempts": num_attempts
@@ -496,13 +500,7 @@ def main():
             # Save dataset eval score as YAML and JSON
             save_yaml(dataset_metrics, dataset_eval_score_path)
             
-            # Also save as JSON
-            dataset_eval_score_json_path = dataset_dir / "dataset_eval_score.json"
-            with open(dataset_eval_score_json_path, 'w') as f:
-                json.dump(dataset_metrics, f, indent=2)
-            
             logging.info(f"Saved dataset eval score to: {dataset_eval_score_path}")
-            logging.info(f"Saved dataset eval score (JSON) to: {dataset_eval_score_json_path}")
             
             # Display dataset metrics summary
             print(f"\nDataset Metrics Summary:")
