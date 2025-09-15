@@ -23,6 +23,9 @@ from pathlib import Path
 from pprint import pformat
 from typing import Any
 
+import os
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
+
 import torch
 import yaml
 from termcolor import colored
@@ -105,6 +108,7 @@ def make_lerobot_dataset_with_episodes(cfg: TrainPipelineConfig, episodes: list[
     )
 
 def eval_policy_on_dataset(
+    cfg: TrainPipelineConfig,
     policy: PreTrainedPolicy,
     eval_dataset: LeRobotDataset,
     device: torch.device,
@@ -117,7 +121,8 @@ def eval_policy_on_dataset(
     eval_dataloader = torch.utils.data.DataLoader(
         eval_dataset,
         # Optimistic estimate of not overfilling GPU memory.
-        batch_size=train_batch_size * 4,
+        # For ACT this uses train_batch_size * 4. For SmolVLA this is train_batch_size * 2 (empirically balance eval time and memory).
+        batch_size=train_batch_size * 2,
         shuffle=False,
         num_workers=0,  # Use 0 workers to avoid issues with multiprocessing
         pin_memory=device.type == "cuda",
@@ -141,17 +146,20 @@ def eval_policy_on_dataset(
             
             # The loss is already averaged within a batch.
             total_loss += loss.item()
-            for k, v in loss_dict.items():
-                if k not in total_loss_dict:
-                    total_loss_dict[k] = 0.0
-                total_loss_dict[k] += v
+
+            if cfg.wandb.log_loss_dict:
+                for k, v in loss_dict.items():
+                    if k not in total_loss_dict:
+                        total_loss_dict[k] = 0.0
+                    total_loss_dict[k] += v
             num_batches += 1
 
     # Average across batches.
     avg_loss = total_loss / num_batches if num_batches > 0 else float('inf')
-    for k in total_loss_dict.keys():
-        v = total_loss_dict[k]
-        total_loss_dict[k] = v / num_batches if num_batches > 0 else float('inf')
+    if cfg.wandb.log_loss_dict:
+        for k in total_loss_dict.keys():
+            v = total_loss_dict[k]
+            total_loss_dict[k] = v / num_batches if num_batches > 0 else float('inf')
     
     return {
         # For ACT, eval loss = l1_loss.
@@ -425,7 +433,7 @@ def train(cfg: TrainPipelineConfig):
             logging.info(train_tracker)
             if wandb_logger:
                 wandb_log_dict = train_tracker.to_dict()
-                if output_dict:
+                if output_dict and cfg.wandb.log_loss_dict:
                     wandb_log_dict.update(output_dict)
                 wandb_logger.log_dict(wandb_log_dict, step)
             train_tracker.reset_averages()
@@ -473,6 +481,7 @@ def train(cfg: TrainPipelineConfig):
                 logging.info(f"Running evaluation on hold-out dataset with {eval_dataset.num_episodes} episodes ({eval_dataset.num_frames} frames)")
                 start_time = time.perf_counter()
                 eval_results = eval_policy_on_dataset(
+                    cfg,
                     policy,
                     eval_dataset,
                     device,

@@ -29,6 +29,14 @@ dependencies = [
   "matplotlib>=3.10.5",
 ]
 
+# Optional dependencies
+[project.optional-dependencies]
+
+# SmolVLA policy dependencies (lerobot core deps come from workspace lerobot)
+smolvla = [
+    "lerobot[smolvla]",  # This pulls in all smolvla deps from the workspace lerobot
+]
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 

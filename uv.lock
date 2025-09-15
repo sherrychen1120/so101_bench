@@ -5756,6 +5756,11 @@ dependencies = [
     { name = "wheel" },
 ]
 
+[package.optional-dependencies]
+smolvla = [
+    { name = "lerobot", extra = ["smolvla"] },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = "==3.12.15" },
@@ -5766,6 +5771,7 @@ requires-dist = [
     { name = "ipykernel", specifier = ">=6.30.1" },
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "lerobot", editable = "third_party/lerobot" },
+    { name = "lerobot", extras = ["smolvla"], marker = "extra == 'smolvla'", editable = "third_party/lerobot" },
     { name = "matplotlib", specifier = ">=3.10.5" },
     { name = "numpy" },
     { name = "opencv-python" },
@@ -5775,6 +5781,7 @@ requires-dist = [
     { name = "pyyaml" },
     { name = "wheel", specifier = "==0.45.1" },
 ]
+provides-extras = ["smolvla"]
 
 [[package]]
 name = "soupsieve"
