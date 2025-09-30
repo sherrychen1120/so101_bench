@@ -43,13 +43,11 @@ class TaskProgressLabeler:
         # Progress stage labels
         self.progress_stage_labels = progress_stage_labels
         
-        # Store labeled intervals: {stage: [(start_time, end_time), ...]}
-        self.labeled_intervals = defaultdict(list)
-        self.current_labeling_stage = None
-        self.labeling_start_time = None
+        # Store labeled time points: [(time, stage), ...] sorted by time
+        self.labeled_points = []  # List of (time, stage) tuples
         
-        # For interval selection and deletion
-        self.selected_interval = None  # (stage, interval_index)
+        # For point selection and deletion
+        self.selected_point_index = None  # Index into labeled_points list
         
         # Colors for visualization (BGR format for OpenCV)
         self.stage_colors = [
@@ -72,13 +70,12 @@ class TaskProgressLabeler:
         print("  SPACE - Play/Pause")
         print("  LEFT/RIGHT - Seek backward/forward (1 second)")
         print("  UP/DOWN - Seek backward/forward (5 seconds)")
-        print(f"  0-{len(self.progress_stage_labels) - 1} - Start labeling progress stage (0={self.progress_stage_labels[0]}, 1={self.progress_stage_labels[1]}, etc.)")
-        print("  ENTER - End current labeling")
+        print(f"  0-{len(self.progress_stage_labels) - 1} - Label current time point with progress stage (0={self.progress_stage_labels[0]}, 1={self.progress_stage_labels[1]}, etc.)")
         print("  S - Show current labels")
         print("  Q - Quit and save")
         print("  R - Reset all labels")
-        print("  TAB - Select next interval for deletion")
-        print("  X/BACKSPACE - Delete selected interval")
+        print("  TAB - Select next point for deletion")
+        print("  X/BACKSPACE - Delete selected point")
         print("  Ctrl+C - Gracefully quit and save")
     
     def get_current_time(self) -> float:
@@ -101,148 +98,149 @@ class TaskProgressLabeler:
         new_time = self.get_current_time() + delta_s
         self.seek_to_time(new_time)
     
-    def start_labeling(self, stage_idx: int) -> None:
-        """Start labeling a progress stage."""
+    def label_current_time(self, stage_idx: int) -> None:
+        """Label the current time point with a progress stage."""
         if 0 <= stage_idx < len(self.progress_stage_labels):
-            if self.current_labeling_stage is not None:
-                print(f"Warning: Already labeling {self.current_labeling_stage}. End current labeling first.")
-                return
-            
             current_time = self.get_current_time()
+            
             # Check horizon constraint
             if self.horizon_s and current_time > self.horizon_s:
-                print(f"Warning: Cannot start labeling beyond horizon ({self.horizon_s:.2f}s). Current time: {current_time:.2f}s")
+                print(f"Warning: Cannot label beyond horizon ({self.horizon_s:.2f}s). Current time: {current_time:.2f}s")
                 return
             
-            self.current_labeling_stage = self.progress_stage_labels[stage_idx]
-            self.labeling_start_time = current_time
-            print(f"Started labeling '{self.current_labeling_stage}' from {self.labeling_start_time:.2f}s")
+            stage = self.progress_stage_labels[stage_idx]
+            
+            self.labeled_points.append((current_time, stage))
+            # Keep points sorted by time
+            self.labeled_points.sort(key=lambda x: x[0])
+            print(f"Labeled time point {current_time:.2f}s as '{stage}'")
     
-    def end_labeling(self) -> None:
-        """End current labeling and save interval."""
-        if self.current_labeling_stage is None:
-            print("No active labeling to end.")
-            return
+    def get_intervals_from_points(self) -> dict[str, list[tuple[float, float]]]:
+        """Generate intervals from labeled time points.
         
-        end_time = self.get_current_time()
+        The interval (start, end) is labeled with the stage that ENDS at 'end' time.
+        If multiple labels are at the same time, earlier labels (by task_spec order) 
+        get the interval, later labels get zero-duration intervals.
         
-        # Clip end time to horizon if needed
-        if self.horizon_s and end_time > self.horizon_s:
-            end_time = self.horizon_s
-            print(f"Warning: End time clipped to horizon ({self.horizon_s:.2f}s)")
+        Returns:
+            Dict mapping stage names to list of intervals (start_time, end_time).
+        """
+        if not self.labeled_points:
+            return {}
         
-        if end_time > self.labeling_start_time:
-            interval = (self.labeling_start_time, end_time)
-            self.labeled_intervals[self.current_labeling_stage].append(interval)
-            print(f"Labeled '{self.current_labeling_stage}': {self.labeling_start_time:.2f}s - {end_time:.2f}s")
-        else:
-            print("Invalid interval: end time must be after start time.")
+        intervals = defaultdict(list)
         
-        self.current_labeling_stage = None
-        self.labeling_start_time = None
+        # Sort points by time, then by stage order for simultaneous points
+        def sort_key(point):
+            time, stage = point
+            stage_order = self.progress_stage_labels.index(stage) if stage in self.progress_stage_labels else 999
+            return (time, stage_order)
+        
+        sorted_points = sorted(self.labeled_points, key=sort_key)
+        
+        # Group points by time to handle simultaneous labels
+        time_groups = []
+        current_time = None
+        current_group = []
+        
+        for time, stage in sorted_points:
+            if current_time is None or abs(time - current_time) < 0.01:  # Same time (within 10ms)
+                if current_time is None:
+                    current_time = time
+                current_group.append((time, stage))
+            else:
+                # New time group
+                if current_group:
+                    time_groups.append((current_time, current_group))
+                current_time = time
+                current_group = [(time, stage)]
+        
+        # Add the last group
+        if current_group:
+            time_groups.append((current_time, current_group))
+        
+        # Generate intervals
+        prev_time = 0.0
+        
+        for group_time, group_stages in time_groups:
+            # The first stage in the group (earliest in task_spec order) gets the interval
+            if group_time > prev_time:
+                first_stage = group_stages[0][1]  # Take the stage from the first (earliest order) point
+                intervals[first_stage].append((prev_time, group_time))
+            
+            # Any additional stages at the same time get zero-duration intervals
+            for i in range(1, len(group_stages)):
+                stage = group_stages[i][1]
+                intervals[stage].append((group_time, group_time))
+            
+            prev_time = group_time
+        
+        return dict(intervals)
     
     def show_labels(self) -> None:
         """Display current labels."""
-        print("\nCurrent labels:")
-        if not self.labeled_intervals:
-            print("  No labels yet.")
+        print("\nCurrent time points:")
+        if not self.labeled_points:
+            print("  No points labeled yet.")
         else:
-            for stage, intervals in self.labeled_intervals.items():
-                print(f"  {stage}:")
-                for start, end in intervals:
-                    print(f"    {start:.2f}s - {end:.2f}s")
+            for time, stage in sorted(self.labeled_points, key=lambda x: x[0]):
+                print(f"  {time:.2f}s: {stage}")
         
-        if self.current_labeling_stage:
-            print(f"\nCurrently labeling: {self.current_labeling_stage} (started at {self.labeling_start_time:.2f}s)")
+        print("\nDerived intervals:")
+        intervals = self.get_intervals_from_points()
+        if not intervals:
+            print("  No intervals yet.")
+        else:
+            for stage, stage_intervals in intervals.items():
+                print(f"  {stage}:")
+                for start, end in stage_intervals:
+                    print(f"    {start:.2f}s - {end:.2f}s")
     
     def reset_labels(self) -> None:
         """Reset all labels."""
-        self.labeled_intervals.clear()
-        self.current_labeling_stage = None
-        self.labeling_start_time = None
-        self.selected_interval = None
+        self.labeled_points.clear()
+        self.selected_point_index = None
         print("All labels reset.")
     
-    def detect_overlaps(self) -> dict[str, list[tuple[str, int, int]]]:
-        """Detect overlapping intervals between different stages.
-        
-        Returns:
-            Dict mapping stage names to list of overlapping intervals.
-            Each overlap is (other_stage, self_interval_idx, other_interval_idx)
-        """
-        overlaps = defaultdict(list)
-        
-        stages = list(self.labeled_intervals.keys())
-        for i, stage1 in enumerate(stages):
-            for j, stage2 in enumerate(stages[i+1:], i+1):
-                for idx1, (start1, end1) in enumerate(self.labeled_intervals[stage1]):
-                    for idx2, (start2, end2) in enumerate(self.labeled_intervals[stage2]):
-                        # Check if intervals overlap
-                        if start1 < end2 and start2 < end1:
-                            overlaps[stage1].append((stage2, idx1, idx2))
-                            overlaps[stage2].append((stage1, idx2, idx1))
-        
-        return overlaps
-    
     def is_valid(self) -> bool:
-        """Check if current labels are valid (no overlaps)."""
-        return len(self.detect_overlaps()) == 0
+        """Check if current labels are valid. Points can't overlap by definition."""
+        return True  # Time points can't overlap, so always valid
     
-    def select_next_interval(self) -> None:
-        """Select the next interval for deletion."""
-        if not self.labeled_intervals:
-            print("No intervals to select.")
+    def select_next_point(self) -> None:
+        """Select the next point for deletion."""
+        if not self.labeled_points:
+            print("No points to select.")
             return
         
-        # Get all intervals in order
-        all_intervals = []
-        for stage in self.progress_stage_labels:
-            if stage in self.labeled_intervals:
-                for idx, interval in enumerate(self.labeled_intervals[stage]):
-                    all_intervals.append((stage, idx))
-        
-        if not all_intervals:
-            print("No intervals to select.")
-            return
-        
-        if self.selected_interval is None:
-            # Select first interval
-            self.selected_interval = all_intervals[0]
+        if self.selected_point_index is None:
+            # Select first point
+            self.selected_point_index = 0
         else:
-            # Find current selection and move to next
-            try:
-                current_idx = all_intervals.index(self.selected_interval)
-                next_idx = (current_idx + 1) % len(all_intervals)
-                self.selected_interval = all_intervals[next_idx]
-            except ValueError:
-                # Current selection no longer exists, select first
-                self.selected_interval = all_intervals[0]
+            # Move to next point (cycle through)
+            self.selected_point_index = (self.selected_point_index + 1) % len(self.labeled_points)
         
-        stage, idx = self.selected_interval
-        start, end = self.labeled_intervals[stage][idx]
-        print(f"Selected: {stage} interval {idx} ({start:.2f}s - {end:.2f}s)")
+        time, stage = self.labeled_points[self.selected_point_index]
+        print(f"Selected: point {self.selected_point_index} ({time:.2f}s: {stage})")
     
-    def delete_selected_interval(self) -> None:
-        """Delete the currently selected interval."""
-        if self.selected_interval is None:
-            print("No interval selected. Use TAB to select an interval first.")
+    def delete_selected_point(self) -> None:
+        """Delete the currently selected point."""
+        if self.selected_point_index is None:
+            print("No point selected. Use TAB to select a point first.")
             return
         
-        stage, idx = self.selected_interval
-        if stage not in self.labeled_intervals or idx >= len(self.labeled_intervals[stage]):
-            print("Selected interval no longer exists.")
-            self.selected_interval = None
+        if self.selected_point_index >= len(self.labeled_points):
+            print("Selected point no longer exists.")
+            self.selected_point_index = None
             return
         
-        interval = self.labeled_intervals[stage][idx]
-        self.labeled_intervals[stage].pop(idx)
+        point = self.labeled_points[self.selected_point_index]
+        self.labeled_points.pop(self.selected_point_index)
         
-        # Clean up empty stages
-        if not self.labeled_intervals[stage]:
-            del self.labeled_intervals[stage]
+        print(f"Deleted point ({point[0]:.2f}s: {point[1]})")
         
-        print(f"Deleted {stage} interval ({interval[0]:.2f}s - {interval[1]:.2f}s)")
-        self.selected_interval = None
+        # Adjust selected index if needed
+        if self.selected_point_index >= len(self.labeled_points):
+            self.selected_point_index = None if not self.labeled_points else len(self.labeled_points) - 1
     
     def create_combined_frame(self, frames: List[np.ndarray]) -> np.ndarray:
         """Combine multiple video frames into a single display frame."""
@@ -281,11 +279,16 @@ class TaskProgressLabeler:
         
         # Main time display
         overlay_text = f"Time: {current_time:.2f}s / {self.duration_s:.2f}s"
-        if self.current_labeling_stage:
-            overlay_text += f" | Labeling: {self.current_labeling_stage}"
         
         cv2.putText(frame, overlay_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
                    0.8, (255, 255, 255), 2, cv2.LINE_AA)
+        
+        # Selected point information
+        if self.selected_point_index is not None and self.selected_point_index < len(self.labeled_points):
+            point_time, point_stage = self.labeled_points[self.selected_point_index]
+            selected_text = f"Selected: point {self.selected_point_index} ({point_time:.2f}s: {point_stage})"
+            cv2.putText(frame, selected_text, (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 
+                       0.7, (255, 255, 0), 2, cv2.LINE_AA)  # Yellow text for visibility
         
         # Horizon information
         if self.horizon_s:
@@ -313,12 +316,12 @@ class TaskProgressLabeler:
         return frame
 
     def create_visualization_panel(self, width: int, height: int) -> np.ndarray:
-        """Create a visualization panel showing all labeled intervals."""
+        """Create a visualization panel showing all labeled time points and derived intervals."""
         panel = np.zeros((height, width, 3), dtype=np.uint8)
         
-        if not self.labeled_intervals:
-            # No intervals to show
-            cv2.putText(panel, "No intervals labeled yet", (10, height//2), 
+        if not self.labeled_points:
+            # No points to show
+            cv2.putText(panel, "No points labeled yet", (10, height//2), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             return panel
         
@@ -326,8 +329,8 @@ class TaskProgressLabeler:
         stage_height = height // (len(self.progress_stage_labels) + 1)  # +1 for status bar
         time_scale = width / self.duration_s if self.duration_s > 0 else 1
         
-        # Get overlaps for error highlighting
-        overlaps = self.detect_overlaps()
+        # Get derived intervals for visualization
+        intervals = self.get_intervals_from_points()
         
         # Draw time axis
         cv2.line(panel, (50, height - 30), (width - 10, height - 30), (255, 255, 255), 1)
@@ -351,38 +354,47 @@ class TaskProgressLabeler:
             # Draw stage baseline
             cv2.line(panel, (50, y), (width - 10, y), (128, 128, 128), 1)
             
-            if stage in self.labeled_intervals:
+            # Draw intervals for this stage
+            if stage in intervals:
                 color_idx = stage_idx % len(self.stage_colors)
                 stage_color = self.stage_colors[color_idx]
                 
-                for interval_idx, (start, end) in enumerate(self.labeled_intervals[stage]):
+                for start, end in intervals[stage]:
                     start_x = int(50 + start * time_scale)
                     end_x = int(50 + end * time_scale)
                     
-                    # Determine color (normal, error, or selected)
-                    color = stage_color
-                    thickness = 3
-                    
-                    # Check if this interval is selected
-                    if (self.selected_interval and 
-                        self.selected_interval[0] == stage and 
-                        self.selected_interval[1] == interval_idx):
-                        color = self.selected_color
-                        thickness = 5
-                    # Check if this interval has overlaps
-                    elif stage in overlaps:
-                        for other_stage, self_idx, other_idx in overlaps[stage]:
-                            if self_idx == interval_idx:
-                                color = self.error_color
-                                thickness = 4
-                                break
-                    
                     # Draw interval line
-                    cv2.line(panel, (start_x, y - 10), (end_x, y - 10), color, thickness)
+                    cv2.line(panel, (start_x, y - 10), (end_x, y - 10), stage_color, 3)
                     
                     # Draw interval markers
-                    cv2.circle(panel, (start_x, y - 10), 3, color, -1)
-                    cv2.circle(panel, (end_x, y - 10), 3, color, -1)
+                    cv2.circle(panel, (start_x, y - 10), 2, stage_color, -1)
+                    cv2.circle(panel, (end_x, y - 10), 2, stage_color, -1)
+        
+        # Draw time points as vertical lines
+        for point_idx, (time, stage) in enumerate(self.labeled_points):
+            x = int(50 + time * time_scale)
+            if 50 <= x <= width - 10:
+                # Find stage color
+                stage_idx = self.progress_stage_labels.index(stage) if stage in self.progress_stage_labels else 0
+                color_idx = stage_idx % len(self.stage_colors)
+                point_color = self.stage_colors[color_idx]
+                
+                # Check if this point is selected
+                if self.selected_point_index == point_idx:
+                    point_color = self.selected_color
+                    thickness = 3
+                else:
+                    thickness = 2
+                
+                # Draw vertical line for the time point
+                cv2.line(panel, (x, 10), (x, height - 50), point_color, thickness)
+                
+                # Draw point marker
+                cv2.circle(panel, (x, 15), 4, point_color, -1)
+                
+                # Draw stage label near the point
+                cv2.putText(panel, stage[:3], (x - 10, 35), cv2.FONT_HERSHEY_SIMPLEX, 
+                           0.3, point_color, 1)
         
         # Draw current time indicator
         current_time = self.get_current_time()
@@ -393,9 +405,8 @@ class TaskProgressLabeler:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
         
         # Draw status indicator
-        is_valid = self.is_valid()
-        status_text = "VALID" if is_valid else "INVALID (Overlaps detected)"
-        status_color = (0, 255, 0) if is_valid else (0, 0, 255)
+        status_text = f"Points: {len(self.labeled_points)}"
+        status_color = (0, 255, 0)
         cv2.putText(panel, f"Status: {status_text}", (10, 25), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 2)
         
@@ -479,25 +490,23 @@ class TaskProgressLabeler:
                     self.seek_relative(5.0)
                     self.is_playing = False
                 elif key in [ord(str(i)) for i in range(len(self.progress_stage_labels))]:
-                    # Start labeling stage
+                    # Label current time point with stage
                     stage_idx = int(chr(key))
-                    self.start_labeling(stage_idx)
-                elif key == 13:  # Enter
-                    self.end_labeling()
+                    self.label_current_time(stage_idx)
                 elif key == ord('s'):
                     self.show_labels()
                 elif key == ord('r'):
                     self.reset_labels()
                 elif key == 9:  # Tab
-                    self.select_next_interval()
+                    self.select_next_point()
                 elif key == ord('x'):  # Use 'x' as reliable delete key
-                    self.delete_selected_interval()
+                    self.delete_selected_point()
                 elif key == 255 and not self.is_playing:
-                    # Only treat 255 as delete when paused AND an interval is selected
-                    print("Detected delete key (255) when video is paused. Deleting selected interval")
-                    self.delete_selected_interval()
+                    # Only treat 255 as delete when paused AND a point is selected
+                    print("Detected delete key (255) when video is paused. Deleting selected point")
+                    self.delete_selected_point()
                 elif key == 8:  # Backspace as alternative
-                    self.delete_selected_interval()
+                    self.delete_selected_point()
                 
                 # Auto advance if playing
                 if self.is_playing:
@@ -519,24 +528,13 @@ class TaskProgressLabeler:
         for cap in self.caps.values():
             cap.release()
         
-        # Validate final labels
+        # Generate intervals from labeled points
         result = {}
-        if not self.is_valid():
-            print("\n" + "="*50)
-            print("WARNING: Labels contain overlapping intervals! Discarding these labels.")
-            overlaps = self.detect_overlaps()
-            for stage, overlap_list in overlaps.items():
-                print(f"Stage '{stage}' has overlaps:")
-                for other_stage, self_idx, other_idx in overlap_list:
-                    self_interval = self.labeled_intervals[stage][self_idx]
-                    other_interval = self.labeled_intervals[other_stage][other_idx]
-                    print(f"  - {stage} interval {self_idx} ({self_interval[0]:.2f}s-{self_interval[1]:.2f}s) "
-                          f"overlaps with {other_stage} interval {other_idx} ({other_interval[0]:.2f}s-{other_interval[1]:.2f}s)")
-            print("="*50)
-            return result
-        else:
-            print("\n✓ All labels are valid (no overlaps detected)")
-
-            for stage, intervals in self.labeled_intervals.items():
-                result[stage] = [[start, end] for start, end in intervals]
-            return result
+        intervals = self.get_intervals_from_points()
+        
+        print(f"\n✓ Generated {sum(len(stage_intervals) for stage_intervals in intervals.values())} intervals from {len(self.labeled_points)} time points")
+        
+        for stage, stage_intervals in intervals.items():
+            result[stage] = [[start, end] for start, end in stage_intervals]
+        
+        return result
