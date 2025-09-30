@@ -440,12 +440,6 @@ def eval_rollout(cfg: RecordConfig):
     """Main evaluation rollout function."""
     init_logging()
     logging.info(pformat(asdict(cfg)))
-    # if cfg.display_data:
-    #     _init_rerun(session_name="recording")
-    
-    # # At least one of policy and teleop must be provided.
-    # if not ((cfg.policy is None) ^ (cfg.teleop is None)):
-    #     raise ValueError("One and only one of policy and teleop must be provided")
     
     dataset_root_dir = Path(cfg.dataset.raw_format_root)
     if not dataset_root_dir.exists():

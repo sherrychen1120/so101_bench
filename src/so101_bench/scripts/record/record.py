@@ -232,7 +232,6 @@ def record_loop(
             )
 
         if display_data:
-            # log_rerun_data(observation, action)
             visualize_camera_feeds(observation)
 
         dt_s = time.perf_counter() - start_loop_t
@@ -245,8 +244,6 @@ def record_loop(
 def record(cfg: RecordConfig) -> LeRobotDataset:
     init_logging()
     logging.info(pformat(asdict(cfg)))
-    # if cfg.display_data:
-    #     _init_rerun(session_name="recording")
 
     robot = make_robot_from_config(cfg.robot)
     teleop = make_teleoperator_from_config(cfg.teleop) if cfg.teleop is not None else None
