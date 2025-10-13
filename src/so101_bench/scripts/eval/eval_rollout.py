@@ -248,7 +248,7 @@ def roll_out_eval_episodes(
     policy: PreTrainedPolicy | None,
     robot: Robot,
     teleop: Teleoperator | None,
-    lerobot_dataset: LeRobotDataset | None,
+    eval_lerobot_dataset: LeRobotDataset | None,
 ) -> None:
     """
     Roll out evaluation episodes
@@ -310,12 +310,11 @@ def roll_out_eval_episodes(
             fps=cfg.dataset.fps,
             teleop=teleop,
             policy=policy,
-            dataset=lerobot_dataset,
+            dataset=eval_lerobot_dataset,
             raw_recorder=raw_recorder,
             control_time_s=cfg.dataset.episode_time_s,
             single_task=cfg.dataset.single_task,
             display_data=cfg.display_data,
-            record_lerobot_dataset=False,
         )
 
         # Execute a few seconds without recording to give time to manually reset the environment
@@ -341,7 +340,9 @@ def roll_out_eval_episodes(
             log_say("Re-record episode", cfg.play_sounds)
             events["rerecord_episode"] = False
             events["exit_early"] = False
-            # No need to clear LeRobot dataset buffer since we're not using it
+            # Clear both raw recorder and LeRobot dataset buffers
+            if eval_lerobot_dataset is not None:
+                eval_lerobot_dataset.clear_episode_buffer()
             raw_recorder.reset_episode_data()
             continue
 
@@ -349,8 +350,12 @@ def roll_out_eval_episodes(
         if not is_headless() and listener is not None:
             listener.stop()
         
-        # Only save raw episode data (no LeRobot format)
+        # Save both raw episode data and LeRobot format
         raw_recorder.save_episode(task_description=cfg.dataset.single_task)
+        
+        # Save LeRobot dataset episode
+        if eval_lerobot_dataset is not None:
+            eval_lerobot_dataset.save_episode()
         
         eval_episode_idx += 1
     
@@ -463,39 +468,53 @@ def eval_rollout(cfg: RecordConfig):
         raise ValueError(f"Source task config not found: {dataset_task_config_path}")
     dataset_task_config = load_yaml(dataset_task_config_path)
 
-    # Create minimal dataset only for policy initialization (no recording to LeRobot format)
-    if cfg.policy is not None:
-        action_features = hw_to_dataset_features(robot.action_features, "action", cfg.dataset.video)
-        obs_features = hw_to_dataset_features(robot.observation_features, "observation", cfg.dataset.video)
-        dataset_features = {**action_features, **obs_features}
+    # Create dataset features for both policy initialization and eval recording
+    action_features = hw_to_dataset_features(robot.action_features, "action", cfg.dataset.video)
+    obs_features = hw_to_dataset_features(robot.observation_features, "observation", cfg.dataset.video)
+    dataset_features = {**action_features, **obs_features}
 
-        # Create a minimal dataset just to get metadata for policy initialization
-        # Use the source dataset to create LeRobotDataset.
-        lerobot_dataset = LeRobotDataset.create(
-            cfg.eval_dataset.name, # This is just a placeholder.
+    user_name = cfg.dataset.repo_id.split("/")[0]
+    eval_dataset_repo_id = f"{user_name}/{cfg.eval_dataset.name}"
+    if cfg.resume:
+        eval_lerobot_dataset = LeRobotDataset(
+            eval_dataset_repo_id,
+            root=cfg.dataset.root,
+            batch_encoding_size=cfg.dataset.video_encoding_batch_size,
+        )
+
+        if hasattr(robot, "cameras") and len(robot.cameras) > 0:
+            eval_lerobot_dataset.start_image_writer(
+                num_processes=cfg.dataset.num_image_writer_processes,
+                num_threads=cfg.dataset.num_image_writer_threads_per_camera * len(robot.cameras),
+            )
+        sanity_check_dataset_robot_compatibility(eval_lerobot_dataset, robot, cfg.dataset.fps, dataset_features)
+        
+        # Initialize episode buffer for resuming dataset
+       #  eval_lerobot_dataset.episode_buffer = eval_lerobot_dataset.create_episode_buffer()
+    else:
+        # Create empty dataset or load existing saved episodes
+        sanity_check_dataset_name(eval_dataset_repo_id, cfg.policy)
+        eval_lerobot_dataset = LeRobotDataset.create(
+            eval_dataset_repo_id,
             cfg.dataset.fps,
             root=cfg.dataset.root,
             robot_type=robot.name,
             features=dataset_features,
-            # Still set these but won't be used...
             use_videos=cfg.dataset.video,
             image_writer_processes=cfg.dataset.num_image_writer_processes,
             image_writer_threads=cfg.dataset.num_image_writer_threads_per_camera * len(robot.cameras),
-            batch_encoding_size=1,
+            batch_encoding_size=cfg.dataset.video_encoding_batch_size,
         )
-        
-        # Load pretrained policy using dataset metadata
-        policy = make_policy(cfg.policy, ds_meta=lerobot_dataset.meta)
+    
+    # Load pretrained policy if specified
+    if cfg.policy is not None:
+        policy = make_policy(cfg.policy, ds_meta=eval_lerobot_dataset.meta)
         policy_info = {
             "policy_path": getattr(cfg.policy, "pretrained_path", None),
             "policy_name": policy.__class__.__name__,
         }
-        
     else:
-        # No policy, no need for dataset at all because record_loop will work
-        # with teleop only.
         policy = None
-        lerobot_dataset = None
         policy_info = None
     
     raw_recorder = RawDatasetRecorder(
@@ -520,11 +539,12 @@ def eval_rollout(cfg: RecordConfig):
     )
     logging.info(f"✓ Selected {len(eval_episodes)} episodes for evaluation")
     
-    # Process evaluation episodes
-    roll_out_eval_episodes(
-        cfg, raw_recorder, source_dataset_dir, 
-        eval_episodes, policy, robot, teleop, lerobot_dataset,
-    )
+    # Process evaluation episodes with VideoEncodingManager
+    with VideoEncodingManager(eval_lerobot_dataset):
+        roll_out_eval_episodes(
+            cfg, raw_recorder, source_dataset_dir, 
+            eval_episodes, policy, robot, teleop, eval_lerobot_dataset,
+        )
     
     logging.info(f"\n✓ Successfully created evaluation dataset: {cfg.eval_dataset.name}")
     logging.info(f"✓ Rolled out {len(eval_episodes)} episodes")
