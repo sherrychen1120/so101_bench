@@ -67,13 +67,12 @@ from lerobot.utils.utils import (
 from lerobot.utils.wandb_utils import WandBLogger
 
 
-def load_splits_yaml(raw_dataset_dir: Path) -> dict:
+def load_splits_yaml(splits_filepath: Path) -> dict:
     """Load splits.yaml file and return split information."""
-    splits_path = raw_dataset_dir / "splits.yaml"
-    if not splits_path.exists():
-        raise FileNotFoundError(f"splits.yaml not found at {splits_path}")
+    if not splits_filepath.exists():
+        raise FileNotFoundError(f"splits.yaml not found at {splits_filepath}")
     
-    with open(splits_path, 'r') as f:
+    with open(splits_filepath, 'r') as f:
         splits = yaml.safe_load(f)
     
     return splits
@@ -302,13 +301,13 @@ def train(cfg: TrainPipelineConfig):
     logging.info("Creating dataset")
     train_dataset = None
     eval_dataset = None
-    if cfg.dataset.raw_dataset_root is not None:
+    if cfg.dataset.splits_filepath is not None:
         # Get the raw dataset directory by combining raw_dataset_root with the last component of repo_id
-        dataset_name = cfg.dataset.repo_id.split('/')[-1]
-        raw_dataset_dir = Path(cfg.dataset.raw_dataset_root) / dataset_name
+        # dataset_name = cfg.dataset.repo_id.split('/')[-1]
+        # raw_dataset_dir = Path(cfg.dataset.raw_dataset_root) / dataset_name
         
-        logging.info(f"Loading splits from {raw_dataset_dir / 'splits.yaml'}")
-        splits = load_splits_yaml(raw_dataset_dir)
+        logging.info(f"Loading splits from {cfg.dataset.splits_filepath}")
+        splits = load_splits_yaml(Path(cfg.dataset.splits_filepath))
         
         # Get train and eval episode indices
         train_episode_names = splits.get('train', [])
@@ -318,6 +317,7 @@ def train(cfg: TrainPipelineConfig):
         eval_episodes = get_episode_indices_from_names(eval_episode_names)
         
         # Save dataset manifest
+        dataset_name = cfg.dataset.repo_id.split('/')[-1]
         save_dataset_manifest(cfg.output_dir, splits, dataset_name)
         
         train_dataset = make_lerobot_dataset_with_episodes(cfg, train_episodes)
