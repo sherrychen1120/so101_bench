@@ -112,7 +112,9 @@ def eval_policy_on_dataset(
     eval_dataset: LeRobotDataset,
     device: torch.device,
     train_batch_size: int,
+    eval_batch_size: int,
     use_amp: bool = False,
+    log_sub_losses: bool = False,
 ) -> dict:
     """Evaluate policy on a eval-dataset by computing loss on eval data."""
     policy.eval()
@@ -120,7 +122,7 @@ def eval_policy_on_dataset(
     eval_dataloader = torch.utils.data.DataLoader(
         eval_dataset,
         # Optimistic estimate of not overfilling GPU memory.
-        batch_size=train_batch_size * 4,
+        batch_size=eval_batch_size, # For training SmolVLA, batch size is 88 to minimize eval time (empirical).
         shuffle=False,
         num_workers=0,  # Use 0 workers to avoid issues with multiprocessing
         pin_memory=device.type == "cuda",
@@ -145,10 +147,16 @@ def eval_policy_on_dataset(
             # The loss is already averaged within a batch.
             total_loss += loss.item()
 
-            for k, v in loss_dict.items():
-                if k not in total_loss_dict:
-                    total_loss_dict[k] = 0.0
-                total_loss_dict[k] += v
+            if log_sub_losses:
+                for k, v in loss_dict.items():
+                    if k not in total_loss_dict:
+                        total_loss_dict[k] = 0.0
+                    if isinstance(v, float):
+                        total_loss_dict[k] += v
+                    elif isinstance(v, torch.Tensor):
+                        total_loss_dict[k] += v.mean().item()
+                    else:
+                        raise ValueError(f"Unknown type in loss_dict with key {k}: {type(v)}")
             num_batches += 1
 
     # Average across batches.
@@ -158,7 +166,6 @@ def eval_policy_on_dataset(
         total_loss_dict[k] = v / num_batches if num_batches > 0 else float('inf')
     
     return {
-        # For ACT, eval loss = l1_loss.
         "eval_loss": avg_loss,
         **total_loss_dict,
     }
@@ -429,8 +436,8 @@ def train(cfg: TrainPipelineConfig):
             logging.info(train_tracker)
             if wandb_logger:
                 wandb_log_dict = train_tracker.to_dict()
-                if output_dict:
-                    wandb_log_dict.update(output_dict)
+                # if output_dict:
+                #     wandb_log_dict.update(output_dict)
                 wandb_logger.log_dict(wandb_log_dict, step)
             train_tracker.reset_averages()
 
@@ -481,7 +488,9 @@ def train(cfg: TrainPipelineConfig):
                     eval_dataset,
                     device,
                     train_batch_size=cfg.batch_size,
+                    eval_batch_size=cfg.eval_batch_size,
                     use_amp=cfg.policy.use_amp,
+                    log_sub_losses=cfg.log_sub_losses,
                 )
                 eval_time = time.perf_counter() - start_time
                 current_eval_loss = eval_results["eval_loss"]
