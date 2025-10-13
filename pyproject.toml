@@ -12,7 +12,7 @@ license = { text = "MIT" }
 authors = [{ name = "Sherry Chen" }]
 dependencies = [
   "numpy",
-  "opencv-python",
+  "opencv-python>=4.12.0",
   "pyyaml",
   "pytest==8.4.1",
   "aiohttp==3.12.15",
