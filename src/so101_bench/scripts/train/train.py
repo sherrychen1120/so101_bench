@@ -25,6 +25,7 @@ from typing import Any
 
 import os
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import torch
 import yaml
@@ -112,6 +113,7 @@ def eval_policy_on_dataset(
     device: torch.device,
     train_batch_size: int,
     eval_batch_size: int,
+    num_workers: int,
     use_amp: bool = False,
     log_sub_losses: bool = False,
 ) -> dict:
@@ -123,7 +125,7 @@ def eval_policy_on_dataset(
         # Optimistic estimate of not overfilling GPU memory.
         batch_size=eval_batch_size, # For training SmolVLA, batch size is 88 to minimize eval time (empirical).
         shuffle=False,
-        num_workers=0,  # Use 0 workers to avoid issues with multiprocessing
+        num_workers=num_workers,
         pin_memory=device.type == "cuda",
         drop_last=False,
     )
@@ -491,6 +493,7 @@ def train(cfg: TrainPipelineConfig):
                     eval_batch_size=cfg.eval_batch_size,
                     use_amp=cfg.policy.use_amp,
                     log_sub_losses=cfg.log_sub_losses,
+                    num_workers=cfg.num_workers,
                 )
                 eval_time = time.perf_counter() - start_time
                 current_eval_loss = eval_results["eval_loss"]
