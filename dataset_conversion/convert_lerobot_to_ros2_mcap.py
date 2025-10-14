@@ -3,12 +3,18 @@
 Convert LeRobotDataset (v2.1) to ROS2 MCAP file for Foxglove visualization.
 
 Usage:
-    python lerobot_to_ros2_mcap.py <dataset_dir> <episode_index> <output_mcap_dir>
-
-Example:
+    # Convert a single episode
     python convert_lerobot_to_ros2_mcap.py \
         --dataset_dir ../../lerobot_data/sherryxychen/eval_test_2025-09-14_smolvla \
         --episode_index 0
+    
+    # Convert an episode and include a source episode for comparison
+    # (source episode topics will be remapped to /source_episode/...)
+    python convert_lerobot_to_ros2_mcap.py \
+        --dataset_dir ../../lerobot_data/sherryxychen/eval_test_2025-09-14_smolvla \
+        --episode_index 0 \
+        --source_episode_dataset_dir ../../lerobot_data/sherryxychen/2025-09-01_pick-and-place-block \
+        --source_episode_index 60
 """
 
 import json
@@ -18,7 +24,7 @@ import numpy as np
 from typing import Dict, Any, List
 
 # ROS2 imports
-from rosbag2_py import SequentialWriter, StorageOptions, ConverterOptions
+from rosbag2_py import SequentialWriter, SequentialReader, StorageOptions, ConverterOptions
 from rclpy.serialization import serialize_message
 from builtin_interfaces.msg import Time
 from std_msgs.msg import Header, Float32MultiArray, MultiArrayDimension
@@ -185,8 +191,71 @@ def setup_ros2_writer(output_path: Path) -> SequentialWriter:
     return writer
 
 
-def convert_episode_to_mcap(dataset_dir: Path, episode_index: int, output_dir: Path):
-    """Convert a LeRobotDataset episode to ROS2 MCAP."""
+def read_mcap_messages(mcap_path: Path) -> List[Dict[str, Any]]:
+    """Read all messages from an MCAP file."""
+    storage_options = StorageOptions(
+        uri=str(mcap_path),
+        storage_id='mcap'
+    )
+    converter_options = ConverterOptions(
+        input_serialization_format='cdr',
+        output_serialization_format='cdr'
+    )
+    
+    reader = SequentialReader()
+    reader.open(storage_options, converter_options)
+    
+    # Get topic metadata
+    topic_types = reader.get_all_topics_and_types()
+    topic_type_map = {t.name: t for t in topic_types}
+    
+    # Read all messages
+    messages = []
+    while reader.has_next():
+        topic_name, data, timestamp = reader.read_next()
+        messages.append({
+            'topic': topic_name,
+            'data': data,
+            'timestamp': timestamp,
+            'type': topic_type_map[topic_name].type
+        })
+    
+    del reader
+    return messages, topic_type_map
+
+
+def load_or_generate_source_episode(source_dataset_dir: Path, source_episode_index: int) -> Path:
+    """Ensure source episode MCAP exists, converting if necessary."""
+    # Check if MCAP already exists
+    source_mcap_dir = source_dataset_dir / "mcap"
+    source_mcap_path = source_mcap_dir / f"episode_{source_episode_index:06d}"
+    
+    # Check if the directory exists (MCAP format creates a directory)
+    if source_mcap_path.exists():
+        print(f"Source episode MCAP already exists at {source_mcap_path}")
+        return source_mcap_path
+    
+    # Need to convert the source episode
+    print(f"Source episode MCAP not found, converting...")
+    source_mcap_dir.mkdir(parents=True, exist_ok=True)
+    convert_episode_to_mcap(source_dataset_dir, source_episode_index, source_mcap_dir, source_episode_data=None)
+    return source_mcap_path
+
+
+def convert_episode_to_mcap(
+    dataset_dir: Path, 
+    episode_index: int, 
+    output_dir: Path,
+    source_episode_data: tuple = None
+):
+    """Convert a LeRobotDataset episode to ROS2 MCAP.
+    
+    Args:
+        dataset_dir: Path to the dataset directory
+        episode_index: Episode index to convert
+        output_dir: Output directory for MCAP files
+        source_episode_data: Optional tuple of (messages, topic_type_map) from source episode
+    """
     # Load metadata
     print(f"Loading metadata from {dataset_dir}")
     metadata = load_dataset_metadata(dataset_dir)
@@ -232,6 +301,25 @@ def convert_episode_to_mcap(dataset_dir: Path, episode_index: int, output_dir: P
         writer.create_topic(topic_metadata)
         print(f"  Created topic: {topic_name} ({msg_type})")
         topic_id += 1
+    
+    # Add source episode topics if provided
+    if source_episode_data is not None:
+        messages, source_topic_type_map = source_episode_data
+        print("\nAdding source episode topics...")
+        for topic_name, topic_info in source_topic_type_map.items():
+            # Remap topic to /source_episode/<topic>
+            remapped_topic_name = f"/source_episode{topic_name}"
+            
+            from rosbag2_py import TopicMetadata
+            topic_metadata = TopicMetadata(
+                id=topic_id,
+                name=remapped_topic_name,
+                type=topic_info.type,
+                serialization_format='cdr'
+            )
+            writer.create_topic(topic_metadata)
+            print(f"  Created source topic: {remapped_topic_name} ({topic_info.type})")
+            topic_id += 1
     
     # Load data from parquet
     print("\nLoading data from parquet files...")
@@ -307,7 +395,26 @@ def convert_episode_to_mcap(dataset_dir: Path, episode_index: int, output_dir: P
     print("\nClosing video files...")
     video_reader.close_all()
     
-    print("Closing MCAP file...")
+    # Write source episode messages if provided
+    if source_episode_data is not None:
+        messages, source_topic_type_map = source_episode_data
+        print(f"\nWriting {len(messages)} messages from source episode...")
+        for i, msg_data in enumerate(messages):
+            if i % 100 == 0:
+                print(f"  Writing source message {i}/{len(messages)}")
+            
+            # Remap topic name
+            remapped_topic = f"/source_episode{msg_data['topic']}"
+            
+            # Write message with remapped topic
+            writer.write(
+                remapped_topic,
+                msg_data['data'],
+                msg_data['timestamp']
+            )
+        print("Finished writing source episode messages")
+    
+    print("\nClosing MCAP file...")
     del writer
     print(f"Successfully created ROS2 MCAP at {output_path}")
 
@@ -333,10 +440,47 @@ def main():
         help="Output ROS2 MCAP directory path. Default is <dataset_dir>/mcap/",
         default=None,
     )
+    parser.add_argument(
+        "--source_episode_dataset_dir",
+        type=str,
+        help="Optional: Path to source episode dataset directory for comparison",
+        default=None,
+    )
+    parser.add_argument(
+        "--source_episode_index",
+        type=int,
+        help="Optional: Source episode index (must be used with --source_episode_dataset_dir)",
+        default=None,
+    )
+    
     args = parser.parse_args()
+    
+    # Validate source episode arguments
+    if (args.source_episode_dataset_dir is None) != (args.source_episode_index is None):
+        parser.error("--source_episode_dataset_dir and --source_episode_index must be used together")
+    
     if args.output_dir is None:
         args.output_dir = Path(args.dataset_dir) / "mcap"
-    convert_episode_to_mcap(Path(args.dataset_dir), args.episode_index, Path(args.output_dir))
+    
+    # Handle source episode if provided
+    source_episode_data = None
+    if args.source_episode_dataset_dir is not None:
+        print("\n=== Processing Source Episode ===")
+        source_dataset_dir = Path(args.source_episode_dataset_dir)
+        source_mcap_path = load_or_generate_source_episode(source_dataset_dir, args.source_episode_index)
+        
+        print(f"\nReading source episode from {source_mcap_path}")
+        source_episode_data = read_mcap_messages(source_mcap_path)
+        print(f"Loaded {len(source_episode_data[0])} messages from source episode")
+    
+    # Convert target episode
+    print("\n=== Converting Target Episode ===")
+    convert_episode_to_mcap(
+        Path(args.dataset_dir), 
+        args.episode_index, 
+        Path(args.output_dir),
+        source_episode_data=source_episode_data
+    )
 
 if __name__ == "__main__":
     main()
