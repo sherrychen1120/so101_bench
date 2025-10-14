@@ -6,19 +6,31 @@ Benchmarking different learning-based policies on SO-101.
 https://huggingface.co/blog/sherryxychen/train-act-on-so-101
 
 ## Installation
-### Option 1: to record, train, eval ML models
+
+The installation instructions are separate for different use cases.
+
+### Use case 1: to record, train, eval ML models
+Use `uv` for this.
 ```bash
 uv sync
 source .venv/bin/activate
 ```
 
-### Option 2: to convert LeRobotDataset to ROS2 mcap files for viz
+### Use case 2: to convert LeRobotDataset to ROS2 mcap files for viz
+
 1. Install ROS2
+
 **For Ubuntu users**
-Install ROS2 based on the steps here: https://docs.ros.org/en/jazzy/Installation.html
+
+Install ROS2 based on the Official instructions [here](https://docs.ros.org/en/jazzy/Installation.html).
+
 **For MacOS users**
-Follow https://robostack.github.io/GettingStarted.html to install ROS2 using `conda`.
-After it's installed
+
+Use `conda` for this, because we are installing ROS2 via RoboStack.
+- Install `conda` first, recommending using `miniforge`.
+- Then run:
 ```bash
-conda activate ros_env
+conda env create -f environment.yml
 ```
+
+If you wish to install ROS2 directly and then install the extra packages on your own, follow RoboStack instructions [here](https://robostack.github.io/GettingStarted.html).

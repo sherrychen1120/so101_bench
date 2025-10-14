@@ -1,0 +1,12 @@
+name: ros_env
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - ros-jazzy-desktop
+  - pyarrow
+  - ipykernel
+  - pandas
+variables:
+  DYLD_LIBRARY_PATH: ''
+prefix: /Users/sherrychen/miniforge3/envs/ros_env
